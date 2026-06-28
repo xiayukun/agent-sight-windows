@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-control"
+version = "0.1.0"
+description = "A pixel-grounded observe-and-act host for Windows AI agents."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+capture-mss = ["mss"]
+capture-pillow = ["Pillow"]
+capture-windows-capture = ["windows-capture"]
+windows-capture = ["mss", "Pillow", "windows-capture"]
+packaging-exe = ["pyinstaller"]
+
+[project.scripts]
+ai-control-cli = "ai_control.adapters.local_cli:main"
+ai-control-mcp = "ai_control.adapters.mcp.server:main"
+ai-control-capture-diagnostics = "ai_control.diagnostics.capture_cli:main"
+ai-control-capture-probe = "ai_control.diagnostics.capture_cli:main"
+ai-control-capture-smoke = "ai_control.diagnostics.capture_smoke_cli:main"
+ai-control-first-use-doctor = "ai_control.diagnostics.first_use_doctor_cli:main"
+ai-control-input-smoke = "ai_control.diagnostics.input_smoke_cli:main"
+ai-control-p0-real-input-smoke = "ai_control.diagnostics.p0_real_input_closed_loop_cli:main"
+ai-control-attention-sync-proof = "ai_control.diagnostics.attention_sync_value:main"
+ai-control-release-readiness = "ai_control.diagnostics.release_readiness:main"
+ai-control-installer = "ai_control.installer:main"
+ai-control-host-agent = "ai_control.host_agent.server:main"
+ai-control-host-agent-scenarios = "ai_control.host_agent.scenarios:main"
+ai-control-host-agent-installer = "ai_control.host_agent.installer:main"
+ai-control-session-supervisor = "ai_control.session_supervisor:main"
+ai-control-tray = "ai_control.tray.cli:main"
+ai-control-tray-gui = "ai_control.tray.gui:main"
+ai-control-segment-decoder = "ai_control.segments.decoder_cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ai_control*"]
+
+[tool.setuptools.package-data]
+"ai_control.adapters.skill" = ["SKILL.md"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

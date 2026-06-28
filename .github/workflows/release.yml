@@ -1,0 +1,133 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.1.0-preview"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Resolve release tag
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            "RELEASE_TAG=${{ inputs.tag }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } else {
+            "RELEASE_TAG=${{ github.ref_name }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package and packaging dependencies
+        shell: pwsh
+        run: |
+          py -m pip install --upgrade pip
+          py -m pip install -e ".[packaging-exe]"
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          py -m unittest discover tests
+
+      - name: Build dist executables
+        shell: pwsh
+        run: |
+          py tools/build_host_agent_exe.py | Tee-Object -FilePath build-report.json
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          if (-not (Test-Path -LiteralPath ".\dist\AIControlSessionSupervisor.exe")) {
+            throw "Expected dist\AIControlSessionSupervisor.exe was not produced."
+          }
+
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem -LiteralPath ".\dist" -File |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName
+              "$($hash.Hash.ToLower())  $($_.Name)"
+            } | Set-Content -LiteralPath ".\dist\SHA256SUMS.txt" -Encoding utf8
+
+      - name: Resolve release notes
+        shell: pwsh
+        run: |
+          $zh = "docs/release-notes-$env:RELEASE_TAG.md"
+          $en = "docs/release-notes-$env:RELEASE_TAG.en.md"
+          if (-not (Test-Path -LiteralPath $zh)) {
+            $zh = "docs/release-notes-template.md"
+          }
+          if (-not (Test-Path -LiteralPath $en)) {
+            $en = "docs/release-notes-template.en.md"
+          }
+          Get-Content -LiteralPath $zh | Set-Content -LiteralPath release-notes-combined.md -Encoding utf8
+          "" | Add-Content -LiteralPath release-notes-combined.md -Encoding utf8
+          "---" | Add-Content -LiteralPath release-notes-combined.md -Encoding utf8
+          "" | Add-Content -LiteralPath release-notes-combined.md -Encoding utf8
+          Get-Content -LiteralPath $en | Add-Content -LiteralPath release-notes-combined.md -Encoding utf8
+          "RELEASE_NOTES=release-notes-combined.md" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentSight-Windows-${{ env.RELEASE_TAG }}
+          path: |
+            dist\*.exe
+            dist\*.cmd
+            dist\SHA256SUMS.txt
+            build-report.json
+          if-no-files-found: error
+
+      - name: Create or update GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $title = "AgentSight for Windows $env:RELEASE_TAG"
+          $assets = @(
+            ".\dist\AIControlInstaller.exe",
+            ".\dist\AIControlSessionSupervisor.exe",
+            ".\dist\AIControlHostAgent.exe",
+            ".\dist\AIControlTrayGui.exe",
+            ".\dist\AIControlTray.exe",
+            ".\dist\AIControlHostAgentInstaller.exe",
+            ".\dist\AIControlHostAgentScenarios.exe",
+            ".\dist\INSTALL_AI_CONTROL.cmd",
+            ".\dist\UNINSTALL_AI_CONTROL.cmd",
+            ".\dist\SHA256SUMS.txt"
+          )
+          $existing = @()
+          foreach ($asset in $assets) {
+            if (Test-Path -LiteralPath $asset) {
+              $existing += $asset
+            }
+          }
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --notes-file $env:RELEASE_NOTES --title $title
+            gh release upload $env:RELEASE_TAG @existing --repo $env:GITHUB_REPOSITORY --clobber
+          } else {
+            gh release create $env:RELEASE_TAG @existing --repo $env:GITHUB_REPOSITORY --title $title --notes-file $env:RELEASE_NOTES
+          }

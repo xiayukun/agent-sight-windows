@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AgentSight Grid Drill</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    body {
+      margin: 0;
+      padding: 20px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+    #progress {
+      font-size: 18px;
+      font-weight: 700;
+      color: #334155;
+    }
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 12px;
+    }
+    button.target {
+      min-height: 72px;
+      border: 0;
+      border-radius: 6px;
+      background: #2563eb;
+      color: white;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+    }
+    button.target.done {
+      background: #16a34a;
+    }
+    #log {
+      margin-top: 16px;
+      padding: 12px;
+      min-height: 64px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      background: white;
+      font-family: Consolas, monospace;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AgentSight Grid Drill</h1>
+    <div id="progress">0 / 30</div>
+  </header>
+  <main id="grid"></main>
+  <section id="log">waiting for pixel-grounded clicks...</section>
+  <script>
+    const grid = document.getElementById("grid");
+    const progress = document.getElementById("progress");
+    const log = document.getElementById("log");
+    const clicked = [];
+    for (let i = 1; i <= 30; i += 1) {
+      const button = document.createElement("button");
+      button.className = "target";
+      button.textContent = `Target ${String(i).padStart(2, "0")}`;
+      button.addEventListener("click", () => {
+        if (!button.classList.contains("done")) {
+          button.classList.add("done");
+          clicked.push(i);
+          progress.textContent = `${clicked.length} / 30`;
+          log.textContent = clicked.map((value) => `clicked Target ${String(value).padStart(2, "0")}`).join("\n");
+        }
+      });
+      grid.appendChild(button);
+    }
+  </script>
+</body>
+</html>

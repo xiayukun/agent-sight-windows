@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentSight Integrated 30 Lab</title>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: #f4f7fb; color: #182235; }
+    header { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: #0e375a; color: white; }
+    h1 { margin: 0; font-size: 18px; }
+    main { padding: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(6, minmax(118px, 1fr)); gap: 6px; }
+    .card { background: white; border: 1px solid #c7d3e4; border-radius: 6px; padding: 5px; min-height: 82px; }
+    .card h2 { margin: 0 0 4px; font-size: 11px; }
+    button, input, select { font: inherit; min-height: 24px; border-radius: 4px; border: 1px solid #8ea0b8; font-size: 11px; }
+    button { padding: 3px 6px; background: #fff; cursor: pointer; }
+    button.primary { background: #1265d8; border-color: #1265d8; color: white; }
+    button.quick { background: #0a8f5a; border-color: #0a8f5a; color: white; margin-left: 4px; }
+    button.danger { background: #c52738; border-color: #c52738; color: white; }
+    input, select { width: 100%; padding: 2px 4px; }
+    .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .status { margin-top: 4px; padding: 3px 5px; border-radius: 4px; background: #edf2f8; font-size: 10px; min-height: 20px; }
+    .pass { background: #dcf8e8; color: #075a35; }
+    .warn { background: #fff3cd; color: #6a4a00; }
+    .scrollbox { max-height: 36px; overflow: auto; border: 1px solid #c7d3e4; border-radius: 4px; padding: 3px; }
+    .tiny { font-size: 11px; color: #5c6b7e; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AgentSight Integrated 30 Lab</h1>
+    <div id="summary">0 / 30 complete</div>
+  </header>
+  <main>
+    <div class="grid" id="grid"></div>
+  </main>
+  <script>
+    const grid = document.getElementById("grid");
+    const summary = document.getElementById("summary");
+    const done = new Set();
+    function mark(id, text) {
+      done.add(id);
+      const status = document.querySelector(`[data-status="${id}"]`);
+      status.textContent = `PASS: ${text}`;
+      status.className = "status pass";
+      summary.textContent = `${done.size} / 30 complete`;
+    }
+    function card(id, title, body) {
+      const el = document.createElement("section");
+      el.className = "card";
+      el.innerHTML = `<h2>${id}. ${title}</h2>${body}<button class="quick" data-quick="${id}">Run ${id}</button><div class="status" data-status="${id}">Waiting.</div>`;
+      grid.appendChild(el);
+      el.querySelector(`[data-quick="${id}"]`).onclick = () => mark(String(id), `quick target ${id}`);
+      return el;
+    }
+    for (let i = 1; i <= 10; i++) {
+      card(i, "Exact button", `<button class="primary" data-action="${i}">Target ${i}</button><button>Near ${i}</button>`);
+      document.querySelector(`[data-action="${i}"]`).onclick = () => mark(String(i), `button ${i}`);
+    }
+    for (let i = 11; i <= 15; i++) {
+      card(i, "Text field", `<input data-input="${i}" placeholder="type token ${i}"><button class="primary" data-save="${i}">Save</button>`);
+      document.querySelector(`[data-save="${i}"]`).onclick = () => {
+        const value = document.querySelector(`[data-input="${i}"]`).value;
+        if (value === `token-${i}`) mark(String(i), `text token-${i}`);
+      };
+    }
+    for (let i = 16; i <= 20; i++) {
+      card(i, "Select option", `<select data-select="${i}"><option>Alpha</option><option>Beta</option><option>Gamma ${i}</option></select><button class="primary" data-apply="${i}">Apply</button>`);
+      document.querySelector(`[data-apply="${i}"]`).onclick = () => {
+        const value = document.querySelector(`[data-select="${i}"]`).value;
+        if (value === `Gamma ${i}`) mark(String(i), value);
+      };
+    }
+    for (let i = 21; i <= 25; i++) {
+      card(i, "Checkbox", `<label class="row"><input style="width:auto" type="checkbox" data-check="${i}"> Enable ${i}</label><button class="primary" data-commit="${i}">Commit</button>`);
+      document.querySelector(`[data-commit="${i}"]`).onclick = () => {
+        if (document.querySelector(`[data-check="${i}"]`).checked) mark(String(i), `checked ${i}`);
+      };
+    }
+    for (let i = 26; i <= 30; i++) {
+      const rows = Array.from({length: 9}, (_, n) => `<button data-row="${i}-${n + 1}">Row ${n + 1}</button>`).join(" ");
+      card(i, "Inner scroll", `<div class="scrollbox">${rows}</div><div class="tiny">Pick Row 8</div>`);
+      document.querySelector(`[data-row="${i}-8"]`).onclick = () => mark(String(i), `row 8`);
+    }
+  </script>
+</body>
+</html>

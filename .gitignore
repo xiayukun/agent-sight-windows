@@ -1,0 +1,38 @@
+# Local runtime/evidence
+runs/
+runs_*/
+runs*/
+runs*.json
+runs*.txt
+round*-runs/
+round*-*runs/
+*.local.json
+
+# Build/package outputs
+build/
+build_*/
+dist/
+dist_*/
+*.exe
+*.dll
+*.pyd
+*.spec.bak
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# AI-Control private stage artifacts
+docs/reviews/
+*review_package*.md
+*REVIEW_PACKAGE*.md
+
+# Secrets/private operator material
+*.secret
+*.token
+*.key
+*.pem

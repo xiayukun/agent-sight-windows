@@ -1,0 +1,28 @@
+name: tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  python-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          py -m unittest discover tests
+
+      - name: Run release readiness preflight
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          py -m ai_control.diagnostics.release_readiness --output runs_ci_release_readiness_report.json

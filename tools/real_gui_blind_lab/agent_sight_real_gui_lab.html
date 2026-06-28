@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentSight Real GUI Blind Lab</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --ink: #172033;
+      --muted: #5d697d;
+      --line: #cfd7e6;
+      --blue: #1665d8;
+      --green: #0a8f5a;
+      --amber: #b36b00;
+      --red: #bd2735;
+      --card: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 24px;
+      color: #fff;
+      background: #14213d;
+      border-bottom: 3px solid #2f80ed;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+    }
+    button, input, select, textarea {
+      font: inherit;
+    }
+    button {
+      border: 1px solid #98a7bd;
+      background: #fff;
+      color: var(--ink);
+      min-height: 34px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    button.danger { background: var(--red); border-color: var(--red); color: #fff; }
+    button.ghost { background: transparent; color: #fff; border-color: rgba(255,255,255,.6); }
+    main {
+      display: grid;
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      gap: 18px;
+      padding: 18px 24px 60px;
+    }
+    nav {
+      position: sticky;
+      top: 68px;
+      align-self: start;
+      max-height: calc(100vh - 92px);
+      overflow: auto;
+      padding: 14px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    nav a {
+      display: block;
+      padding: 8px 10px;
+      color: var(--blue);
+      text-decoration: none;
+      border-radius: 5px;
+      font-size: 14px;
+    }
+    nav a:hover { background: #eaf1ff; }
+    .grid {
+      display: grid;
+      gap: 18px;
+    }
+    section.task {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 260px;
+    }
+    section.task h2 {
+      margin: 0 0 8px;
+      font-size: 19px;
+    }
+    .note {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .result {
+      margin-top: 12px;
+      padding: 10px 12px;
+      min-height: 38px;
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .result.pass { border-color: #74c69d; color: #065f46; background: #ecfdf5; }
+    .result.warn { border-color: #f6c453; color: #7c4a03; background: #fff8e6; }
+    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .stack { display: grid; gap: 10px; max-width: 640px; }
+    .field {
+      min-height: 36px;
+      padding: 6px 9px;
+      border: 1px solid #98a7bd;
+      border-radius: 6px;
+      background: #fff;
+    }
+    textarea.field {
+      width: min(620px, 100%);
+      min-height: 90px;
+      resize: vertical;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(120px, 1fr));
+      gap: 12px;
+      max-width: 680px;
+    }
+    .choice {
+      padding: 16px;
+      border: 1px solid #9fb0c6;
+      border-radius: 7px;
+      background: #fff;
+      text-align: center;
+    }
+    .choice.good { border-color: #34a853; background: #f0fff4; }
+    .mini-table {
+      width: 760px;
+      border-collapse: collapse;
+      background: #fff;
+    }
+    .mini-table th, .mini-table td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .scrollbox {
+      width: min(820px, 100%);
+      max-height: 260px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 54px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      background: #687386;
+    }
+    .pill.green { background: var(--green); }
+    .pill.amber { background: var(--amber); }
+    .pill.red { background: var(--red); }
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      background: rgba(12, 22, 38, .45);
+      align-items: center;
+      justify-content: center;
+    }
+    .modal {
+      width: 420px;
+      background: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.25);
+    }
+    .suggestions {
+      display: none;
+      position: absolute;
+      top: 68px;
+      left: 0;
+      right: 0;
+      max-width: 500px;
+      background: #fff;
+      border: 1px solid #98a7bd;
+      border-radius: 7px;
+      box-shadow: 0 10px 24px rgba(20, 33, 61, .18);
+      overflow: hidden;
+    }
+    .suggestions div {
+      padding: 10px 12px;
+      border-bottom: 1px solid #e6ebf3;
+    }
+    .suggestions div:last-child { border-bottom: 0; }
+    .relative { position: relative; max-width: 520px; }
+    .slider {
+      width: 320px;
+      accent-color: var(--blue);
+    }
+    .toast {
+      display: none;
+      position: fixed;
+      right: 28px;
+      bottom: 28px;
+      z-index: 6;
+      background: #14213d;
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 8px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    }
+    .status-log {
+      width: min(760px, 100%);
+      min-height: 90px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #0f172a;
+      color: #e5edf8;
+      font-family: Consolas, monospace;
+      font-size: 13px;
+      white-space: pre-line;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AgentSight Real GUI Blind Lab</h1>
+    <div class="toolbar">
+      <span id="summary">0 / 10 complete</span>
+      <button class="ghost" id="resetAll">Reset all</button>
+    </div>
+  </header>
+  <main>
+    <nav aria-label="Task list">
+      <a href="#task-1">Task 1: Similar buttons</a>
+      <a href="#task-2">Task 2: Delayed suggestions</a>
+      <a href="#task-3">Task 3: Dropdown choice</a>
+      <a href="#task-4">Task 4: Scroll row</a>
+      <a href="#task-5">Task 5: Slider threshold</a>
+      <a href="#task-6">Task 6: Modal confirm</a>
+      <a href="#task-7">Task 7: Tabs and save</a>
+      <a href="#task-8">Task 8: Dense table</a>
+      <a href="#task-9">Task 9: Toast delay</a>
+      <a href="#task-10">Task 10: Multi-step note</a>
+    </nav>
+    <div class="grid">
+      <section class="task" id="task-1">
+        <h2>Task 1: Similar buttons</h2>
+        <p class="note">Click the button labeled “Approve Delta”. Other buttons are deliberately similar.</p>
+        <div class="row">
+          <button>Approve Data</button>
+          <button id="approveDelta" class="primary">Approve Delta</button>
+          <button>Approve Detail</button>
+          <button>Archive Delta</button>
+        </div>
+        <div class="result" id="result1">Waiting for exact click.</div>
+      </section>
+
+      <section class="task" id="task-2">
+        <h2>Task 2: Delayed suggestions</h2>
+        <p class="note">Type “orion” into the search field, wait for suggestions, then choose “Orion Billing”.</p>
+        <div class="relative">
+          <input class="field" id="searchBox" placeholder="Search account">
+          <div class="suggestions" id="suggestions">
+            <div>Orion Backup</div>
+            <div id="orionBilling">Orion Billing</div>
+            <div>Orion Build Queue</div>
+          </div>
+        </div>
+        <div class="result" id="result2">No account selected.</div>
+      </section>
+
+      <section class="task" id="task-3">
+        <h2>Task 3: Dropdown choice</h2>
+        <p class="note">Set the status dropdown to “Needs Review”, then press Apply.</p>
+        <div class="row">
+          <select class="field" id="statusSelect">
+            <option>Ready</option>
+            <option>Needs Review</option>
+            <option>Blocked</option>
+          </select>
+          <button id="applyStatus" class="primary">Apply</button>
+        </div>
+        <div class="result" id="result3">Status not applied.</div>
+      </section>
+
+      <section class="task" id="task-4">
+        <h2>Task 4: Scroll row</h2>
+        <p class="note">In the scroll box, find ticket AC-042 and click its “Flag” button.</p>
+        <div class="scrollbox">
+          <table class="mini-table" id="ticketTable">
+            <thead><tr><th>Ticket</th><th>Owner</th><th>State</th><th>Action</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="result" id="result4">Ticket AC-042 not flagged.</div>
+      </section>
+
+      <section class="task" id="task-5">
+        <h2>Task 5: Slider threshold</h2>
+        <p class="note">Move the confidence slider to 70 or higher, then press Save threshold.</p>
+        <div class="row">
+          <input id="confidence" class="slider" type="range" min="0" max="100" value="35">
+          <span id="confidenceValue" class="pill">35</span>
+          <button id="saveConfidence" class="primary">Save threshold</button>
+        </div>
+        <div class="result" id="result5">Threshold not saved.</div>
+      </section>
+
+      <section class="task" id="task-6">
+        <h2>Task 6: Modal confirm</h2>
+        <p class="note">Open the confirm dialog and choose “Keep Draft”. Avoid the destructive red button.</p>
+        <div class="row">
+          <button id="openModal">Open confirm dialog</button>
+        </div>
+        <div class="result" id="result6">No modal choice yet.</div>
+      </section>
+
+      <section class="task" id="task-7">
+        <h2>Task 7: Tabs and save</h2>
+        <p class="note">Open the “Advanced” tab, enable Dry-run mode, and save settings.</p>
+        <div class="row">
+          <button id="tabGeneral">General</button>
+          <button id="tabAdvanced">Advanced</button>
+        </div>
+        <div id="tabPanel" class="stack" style="margin-top: 10px;">
+          <label><input id="dryRun" type="checkbox" disabled> Dry-run mode</label>
+          <button id="saveSettings" class="primary" disabled>Save settings</button>
+        </div>
+        <div class="result" id="result7">Advanced settings not saved.</div>
+      </section>
+
+      <section class="task" id="task-8">
+        <h2>Task 8: Dense table</h2>
+        <p class="note">In this table, select the row with code “NX-7Q” and priority “High”.</p>
+        <div class="cards">
+          <button class="choice">NX-7O<br><span class="pill amber">High</span></button>
+          <button class="choice">NX-7Q<br><span class="pill">Low</span></button>
+          <button class="choice" id="nx7qHigh">NX-7Q<br><span class="pill red">High</span></button>
+          <button class="choice">MX-7Q<br><span class="pill red">High</span></button>
+          <button class="choice">NX-70<br><span class="pill red">High</span></button>
+          <button class="choice">NX-7Q<br><span class="pill amber">Medium</span></button>
+        </div>
+        <div class="result" id="result8">No dense row selected.</div>
+      </section>
+
+      <section class="task" id="task-9">
+        <h2>Task 9: Toast delay</h2>
+        <p class="note">Press Queue Sync and wait until the delayed toast appears.</p>
+        <button id="queueSync" class="primary">Queue Sync</button>
+        <div class="result" id="result9">Sync not queued.</div>
+      </section>
+
+      <section class="task" id="task-10">
+        <h2>Task 10: Multi-step note</h2>
+        <p class="note">Replace the note with “AI-CONTROL-REAL-TEST”, then click Save note.</p>
+        <div class="stack">
+          <textarea id="noteText" class="field">Draft text that must be replaced.</textarea>
+          <button id="saveNote" class="primary">Save note</button>
+        </div>
+        <div class="result" id="result10">Note not saved.</div>
+      </section>
+    </div>
+  </main>
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal">
+      <h2>Confirm Draft Action</h2>
+      <p class="note">Choose carefully. The red action is intentionally unsafe for this lab.</p>
+      <div class="row">
+        <button id="keepDraft" class="primary">Keep Draft</button>
+        <button id="deleteDraft" class="danger">Delete Draft</button>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast">Sync queued after delay</div>
+  <script>
+    const completed = new Set();
+    const mark = (n, text) => {
+      completed.add(n);
+      const el = document.getElementById(`result${n}`);
+      el.textContent = text;
+      el.className = "result pass";
+      document.getElementById("summary").textContent = `${completed.size} / 10 complete`;
+    };
+    document.getElementById("resetAll").addEventListener("click", () => location.reload());
+    document.getElementById("approveDelta").addEventListener("click", () => mark(1, "PASS: Approve Delta clicked."));
+
+    const searchBox = document.getElementById("searchBox");
+    const suggestions = document.getElementById("suggestions");
+    let suggestionTimer = null;
+    searchBox.addEventListener("input", () => {
+      suggestions.style.display = "none";
+      clearTimeout(suggestionTimer);
+      if (searchBox.value.toLowerCase().includes("orion")) {
+        suggestionTimer = setTimeout(() => { suggestions.style.display = "block"; }, 650);
+      }
+    });
+    document.getElementById("orionBilling").addEventListener("click", () => {
+      searchBox.value = "Orion Billing";
+      suggestions.style.display = "none";
+      mark(2, "PASS: Orion Billing selected after delayed suggestion.");
+    });
+
+    document.getElementById("applyStatus").addEventListener("click", () => {
+      const value = document.getElementById("statusSelect").value;
+      if (value === "Needs Review") mark(3, "PASS: Needs Review applied.");
+      else {
+        const el = document.getElementById("result3");
+        el.textContent = `Current status is ${value}; not the requested value.`;
+        el.className = "result warn";
+      }
+    });
+
+    const tbody = document.querySelector("#ticketTable tbody");
+    for (let i = 1; i <= 60; i += 1) {
+      const code = i === 42 ? "AC-042" : `AC-${String(i).padStart(3, "0")}`;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${code}</td><td>Owner ${i}</td><td>${i % 3 === 0 ? "Open" : "Queued"}</td><td><button>Flag</button></td>`;
+      tr.querySelector("button").addEventListener("click", () => {
+        if (code === "AC-042") mark(4, "PASS: Ticket AC-042 flagged.");
+        else {
+          const el = document.getElementById("result4");
+          el.textContent = `Flagged ${code}, not AC-042.`;
+          el.className = "result warn";
+        }
+      });
+      tbody.appendChild(tr);
+    }
+
+    const confidence = document.getElementById("confidence");
+    const confidenceValue = document.getElementById("confidenceValue");
+    confidence.addEventListener("input", () => {
+      confidenceValue.textContent = confidence.value;
+      confidenceValue.className = confidence.value >= 70 ? "pill green" : "pill";
+    });
+    document.getElementById("saveConfidence").addEventListener("click", () => {
+      if (Number(confidence.value) >= 70) mark(5, `PASS: Threshold saved at ${confidence.value}.`);
+      else {
+        const el = document.getElementById("result5");
+        el.textContent = `Threshold ${confidence.value} is below 70.`;
+        el.className = "result warn";
+      }
+    });
+
+    const modalBackdrop = document.getElementById("modalBackdrop");
+    document.getElementById("openModal").addEventListener("click", () => { modalBackdrop.style.display = "flex"; });
+    document.getElementById("keepDraft").addEventListener("click", () => {
+      modalBackdrop.style.display = "none";
+      mark(6, "PASS: Keep Draft selected.");
+    });
+    document.getElementById("deleteDraft").addEventListener("click", () => {
+      modalBackdrop.style.display = "none";
+      const el = document.getElementById("result6");
+      el.textContent = "Unsafe red action clicked.";
+      el.className = "result warn";
+    });
+
+    const dryRun = document.getElementById("dryRun");
+    const saveSettings = document.getElementById("saveSettings");
+    document.getElementById("tabGeneral").addEventListener("click", () => {
+      dryRun.disabled = true;
+      saveSettings.disabled = true;
+    });
+    document.getElementById("tabAdvanced").addEventListener("click", () => {
+      dryRun.disabled = false;
+      saveSettings.disabled = false;
+    });
+    saveSettings.addEventListener("click", () => {
+      if (dryRun.checked) mark(7, "PASS: Advanced dry-run setting saved.");
+      else {
+        const el = document.getElementById("result7");
+        el.textContent = "Advanced tab open, but Dry-run mode is not enabled.";
+        el.className = "result warn";
+      }
+    });
+
+    document.getElementById("nx7qHigh").addEventListener("click", () => mark(8, "PASS: NX-7Q High selected."));
+
+    document.getElementById("queueSync").addEventListener("click", () => {
+      const el = document.getElementById("result9");
+      el.textContent = "Queued; waiting for delayed toast.";
+      el.className = "result warn";
+      setTimeout(() => {
+        document.getElementById("toast").style.display = "block";
+        mark(9, "PASS: Sync toast appeared after delay.");
+        setTimeout(() => { document.getElementById("toast").style.display = "none"; }, 3000);
+      }, 900);
+    });
+
+    document.getElementById("saveNote").addEventListener("click", () => {
+      const value = document.getElementById("noteText").value.trim();
+      if (value === "AI-CONTROL-REAL-TEST") mark(10, "PASS: Note replaced and saved.");
+      else {
+        const el = document.getElementById("result10");
+        el.textContent = `Current note does not match target.`;
+        el.className = "result warn";
+      }
+    });
+  </script>
+</body>
+</html>
