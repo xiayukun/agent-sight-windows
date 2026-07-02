@@ -86,8 +86,10 @@ class SegmentFrameRecorder:
         width, height = image.size
         if width <= 0 or height <= 0:
             return self._not_recorded("frame_geometry_missing", frame=frame, source=source, event_id=event_id, view_id=view_id)
-        captured_at_ms = _timestamp_ms(frame.get("captured_at") or frame.get("timestamp"))
-        bucket = _bucket_from_time(captured_at_ms / 1000.0, self.daily_segment_boundary_local_time, self.segment_bucket_granularity)
+        captured_at_value = frame.get("captured_at") or frame.get("timestamp")
+        captured_at_ms = _timestamp_ms(captured_at_value)
+        bucket_time: Any = captured_at_value if isinstance(captured_at_value, str) and captured_at_value.strip() else captured_at_ms / 1000.0
+        bucket = _bucket_from_time(bucket_time, self.daily_segment_boundary_local_time, self.segment_bucket_granularity)
         writer_width = getattr(self.writer, "width", width) if self.writer is not None else width
         writer_height = getattr(self.writer, "height", height) if self.writer is not None else height
         segment_too_old = self._segment_started_at_ms and captured_at_ms - self._segment_started_at_ms >= self._max_segment_duration_ms

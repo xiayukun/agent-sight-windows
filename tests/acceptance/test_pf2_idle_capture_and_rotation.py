@@ -140,8 +140,8 @@ class PF2IdleCaptureAndRotationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             evidence = EvidenceReplayService(temp_dir, session_id="session-rotation")
             recorder = SegmentFrameRecorder(evidence, daily_segment_boundary_local_time="00:00")
-            first_frame = _fake_media_frame(evidence, "first.png", captured_at=_epoch("2026-06-21T23:59:59+08:00"))
-            second_frame = _fake_media_frame(evidence, "second.png", captured_at=_epoch("2026-06-22T00:00:01+08:00"))
+            first_frame = _fake_media_frame(evidence, "first.png", captured_at="2026-06-21T23:59:59+08:00")
+            second_frame = _fake_media_frame(evidence, "second.png", captured_at="2026-06-22T00:00:01+08:00")
             first = recorder.record_frame(first_frame, source="idle", event_id="idle-before")
             second = recorder.record_frame(second_frame, source="idle", event_id="idle-after")
             recorder.close()
@@ -254,18 +254,19 @@ class PF2IdleCaptureAndRotationTest(unittest.TestCase):
         self.assertEqual(status["segment_bucket_granularity"], "hourly")
 
 
-def _fake_media_frame(evidence: EvidenceReplayService, name: str, *, captured_at: float) -> dict[str, Any]:
+def _fake_media_frame(evidence: EvidenceReplayService, name: str, *, captured_at: float | str) -> dict[str, Any]:
     from PIL import Image
     from io import BytesIO
 
     buf = BytesIO()
     Image.new("RGBA", (8, 8), (20, 80, 140, 255)).save(buf, format="PNG")
     media = evidence.write_media_bytes(name, buf.getvalue())
+    captured_at_seconds = _epoch(captured_at) if isinstance(captured_at, str) else float(captured_at)
     return {
         "observation_id": name.removesuffix(".png"),
         "captured_at": captured_at,
         "timestamp": captured_at,
-        "captured_at_monotonic_ms": int(captured_at * 1000),
+        "captured_at_monotonic_ms": int(captured_at_seconds * 1000),
         "media_mime": "image/png",
         "width": 8,
         "height": 8,

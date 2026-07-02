@@ -136,7 +136,7 @@ class PF2SegmentCaptureIntegrationTest(unittest.TestCase):
             )
             recorder.close()
 
-            self.assertEqual(Path(record["segment_path_abs"]).parent, root / "segments")
+            self.assertEqual(Path(record["segment_path_abs"]).parent.resolve(), (root / "segments").resolve())
             self.assertEqual(Path(record["segment_path_abs"]).name, "agentsight-20260620-001.mkv")
             self.assertTrue(Path(record["segment_path_abs"]).exists())
 
