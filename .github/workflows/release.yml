@@ -56,19 +56,19 @@ jobs:
       - name: Install package and packaging dependencies
         shell: pwsh
         run: |
-          py -m pip install --upgrade pip
-          py -m pip install -e ".[packaging-exe]"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[packaging-exe]"
 
       - name: Run tests
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
-          py -m unittest discover tests
+          python -m unittest discover tests
 
       - name: Build dist executables
         shell: pwsh
         run: |
-          py tools/build_host_agent_exe.py | Tee-Object -FilePath build-report.json
+          python tools/build_host_agent_exe.py | Tee-Object -FilePath build-report.json
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }

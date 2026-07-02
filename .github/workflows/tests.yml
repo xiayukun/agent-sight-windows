@@ -19,10 +19,10 @@ jobs:
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
-          py -m unittest discover tests
+          python -m unittest discover tests
 
       - name: Run release readiness preflight
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
-          py -m agentsight.diagnostics.release_readiness --output runs_ci_release_readiness_report.json
+          python -m agentsight.diagnostics.release_readiness --output runs_ci_release_readiness_report.json
