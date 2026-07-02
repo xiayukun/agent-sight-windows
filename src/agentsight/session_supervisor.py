@@ -2073,7 +2073,7 @@ def _install_layout() -> str:
 
 def _default_runtime_root() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        return Path(sys.executable).parent
     return Path(__file__).resolve().parents[2]
 
 
@@ -2092,7 +2092,7 @@ def _default_tray_gui_exe_arg() -> str:
 
 
 def _frozen_session_supervisor_exe() -> Path:
-    executable = Path(sys.executable).resolve()
+    executable = Path(sys.executable)
     if executable.name.lower() == "agentsightsupervisor.exe":
         return executable
     candidate = executable.with_name("AgentSightSupervisor.exe")
@@ -2102,7 +2102,7 @@ def _frozen_session_supervisor_exe() -> Path:
 def _adjacent_exe(filename: str) -> Path | None:
     if not getattr(sys, "frozen", False):
         return None
-    candidate = Path(sys.executable).resolve().with_name(filename)
+    candidate = Path(sys.executable).with_name(filename)
     return candidate if candidate.exists() else None
 
 

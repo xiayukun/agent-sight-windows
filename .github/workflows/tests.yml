@@ -21,6 +21,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[capture-pillow]"
 
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          ffmpeg -version
+
       - name: Run unit tests
         shell: pwsh
         run: |

@@ -83,7 +83,7 @@ def launch_timeline_viewer_process(*, mode: str = "timeline") -> dict[str, Any]:
 
 
 def _packaged_timeline_viewer_exe() -> Path:
-    return Path(sys.executable).resolve().parent / "AgentSightTimelineViewer.exe"
+    return Path(sys.executable).parent / "AgentSightTimelineViewer.exe"
 
 
 def _source_repo_root_for_launcher() -> Path | None:

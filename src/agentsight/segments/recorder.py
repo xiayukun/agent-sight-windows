@@ -529,6 +529,17 @@ def _datetime_from_value(value: Any) -> datetime:
     if isinstance(value, (int, float)):
         return datetime.fromtimestamp(float(value)).astimezone()
     if isinstance(value, str) and value.strip():
+        text = value.strip()
+        try:
+            normalized = text.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(normalized)
+            if dt.tzinfo is not None:
+                # Explicit ISO offsets describe the capture-side local wall time.
+                # Preserve that basis for stable bucket names instead of converting
+                # to the CI/host machine timezone (for example +08:00 -> UTC-08).
+                return dt
+        except ValueError:
+            pass
         try:
             return datetime.fromtimestamp(_timestamp_ms(value) / 1000.0).astimezone()
         except Exception:
