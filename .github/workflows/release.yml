@@ -63,7 +63,18 @@ jobs:
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
-          python -m unittest discover tests
+          python -m unittest discover tests *> unittest-output.txt
+          $testExitCode = $LASTEXITCODE
+          Get-Content -LiteralPath unittest-output.txt
+          if ($testExitCode -ne 0) {
+            $testOutput = Get-Content -LiteralPath unittest-output.txt -Raw
+            if ($testOutput.Length -gt 6000) {
+              $testOutput = $testOutput.Substring($testOutput.Length - 6000)
+            }
+            $escaped = $testOutput.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::error title=Unit tests failed::$escaped"
+            exit $testExitCode
+          }
 
       - name: Build dist executables
         shell: pwsh
