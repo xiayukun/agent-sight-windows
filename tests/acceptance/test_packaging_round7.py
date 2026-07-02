@@ -593,6 +593,7 @@ class Round7PackagingTest(unittest.TestCase):
         self.assertIn("runs-on: windows-latest", text)
         self.assertIn("python -m unittest discover tests", text)
         self.assertIn("python tools/build_host_agent_exe.py", text)
+        self.assertIn('python -m pip install -e ".[packaging-exe,capture-pillow]"', text)
         self.assertIn("SHA256SUMS.txt", text)
         self.assertIn("actions/upload-artifact", text)
         self.assertIn("gh release create", text)
