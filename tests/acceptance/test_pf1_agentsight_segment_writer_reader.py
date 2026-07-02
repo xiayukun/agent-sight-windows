@@ -24,7 +24,7 @@ class PF1AgentSightSegmentWriterReaderTest(unittest.TestCase):
         return image
 
     def test_static_frames_write_no_change_record_and_restore(self) -> None:
-        from ai_control.segments import SegmentReader, SegmentWriter, validate_segment_manifest
+        from agentsight.segments import SegmentReader, SegmentWriter, validate_segment_manifest
 
         with tempfile.TemporaryDirectory() as tmp:
             writer = SegmentWriter.create(Path(tmp) / "segment-static", segment_id="seg-static")
@@ -53,7 +53,7 @@ class PF1AgentSightSegmentWriterReaderTest(unittest.TestCase):
             self.assertFalse(report["boundary"]["business_success_judged"])
 
     def test_small_region_change_writes_delta_crop_and_restores_exact_pixels(self) -> None:
-        from ai_control.segments import SegmentReader, SegmentWriter, sha256_image_rgba
+        from agentsight.segments import SegmentReader, SegmentWriter, sha256_image_rgba
 
         with tempfile.TemporaryDirectory() as tmp:
             base = self._image()
@@ -82,7 +82,7 @@ class PF1AgentSightSegmentWriterReaderTest(unittest.TestCase):
             self.assertEqual(sha256_image_rgba(restored), sha256_image_rgba(changed))
 
     def test_large_region_change_forces_new_keyframe(self) -> None:
-        from ai_control.segments import SegmentWriter
+        from agentsight.segments import SegmentWriter
 
         with tempfile.TemporaryDirectory() as tmp:
             writer = SegmentWriter.create(
@@ -103,7 +103,7 @@ class PF1AgentSightSegmentWriterReaderTest(unittest.TestCase):
             self.assertEqual(manifest["keyframe_count"], 2)
 
     def test_keyframe_interval_and_delta_chain_restore(self) -> None:
-        from ai_control.segments import SegmentReader, SegmentWriter, sha256_image_rgba
+        from agentsight.segments import SegmentReader, SegmentWriter, sha256_image_rgba
 
         with tempfile.TemporaryDirectory() as tmp:
             base = self._image()

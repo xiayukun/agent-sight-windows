@@ -9,7 +9,7 @@ AgentSight for Windows runs locally. It does not automatically upload screenshot
 Default local data directory:
 
 ```text
-%LOCALAPPDATA%\ai-control
+%LOCALAPPDATA%\AgentSight
 ```
 
 It may contain:

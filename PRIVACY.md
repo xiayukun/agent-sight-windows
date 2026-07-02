@@ -9,7 +9,7 @@ AgentSight for Windows 只在本机运行。它不会把截图、输入记录、
 默认本地数据目录：
 
 ```text
-%LOCALAPPDATA%\ai-control
+%LOCALAPPDATA%\AgentSight
 ```
 
 可能包含：

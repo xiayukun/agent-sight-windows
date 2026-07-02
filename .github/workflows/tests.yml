@@ -25,4 +25,4 @@ jobs:
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
-          py -m ai_control.diagnostics.release_readiness --output runs_ci_release_readiness_report.json
+          py -m agentsight.diagnostics.release_readiness --output runs_ci_release_readiness_report.json

@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(SPECPATH).parents[1]
 
 a = Analysis(
-    [str(ROOT / "src" / "ai_control" / "tray" / "timeline_viewer.py")],
+    [str(ROOT / "src" / "agentsight" / "tray" / "timeline_viewer.py")],
     pathex=[str(ROOT / "src")],
     binaries=[],
     datas=[],

@@ -35,7 +35,7 @@ traceable visual memory + attention toolbox
 
 ## Later Direction
 
-- P-CONFIG-RECORDING-POLICY: tray recording configuration center, unified around `%LOCALAPPDATA%\ai-control\tray-config.jsonc` for user-adjustable idle capture, action pre/post frames, post-action FPS / duration / max frames, and retention days only; timeline is always enabled and operation logs are always saved, not user toggles;
+- P-CONFIG-RECORDING-POLICY: tray recording configuration center, unified around `%LOCALAPPDATA%\AgentSight\tray-config.jsonc` for user-adjustable idle capture, action pre/post frames, post-action FPS / duration, and retention days only; timeline is always enabled and operation logs are always saved, not user toggles;
 - P0-F: short-term frame buffer / ring buffer / post-action clips;
 - P0-G: region change index;
 - P0-H: on-demand frame, crop, before/after, diff heatmap retrieval;

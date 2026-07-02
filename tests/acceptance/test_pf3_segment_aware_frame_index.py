@@ -5,8 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ai_control.adapters.mcp import MCPStdioAdapter
-from ai_control.segments import BinarySegmentReader, SegmentReader
+from agentsight.adapters.mcp import MCPStdioAdapter
+from agentsight.segments import BinarySegmentReader, SegmentReader
+from agentsight.segments.decoder import decode_segment_frame_to_image
 from tests.acceptance.test_p3a_screen_look_do_protocol import P3AInputChannel, P3AStablePostObserveLookPngChannel
 
 
@@ -70,6 +71,9 @@ class PF3SegmentAwareFrameIndexTest(unittest.TestCase):
 
             if restore_ref.get("storage_format") == "binary_agseg":
                 restored, report = BinarySegmentReader(Path(restore_ref["segment_path"])).restore_frame(restore_ref["frame_id"])
+            elif restore_ref.get("storage_format") == "mkv_vfr" or str(restore_ref.get("segment_path", "")).lower().endswith(".mkv"):
+                adapter.session.gateway.segment_recorder.close()
+                restored, report = decode_segment_frame_to_image(restore_ref)
             else:
                 restored, report = SegmentReader(Path(restore_ref["segment_path"])).restore_frame(restore_ref["frame_id"])
             adapter.session.gateway.segment_recorder.close()

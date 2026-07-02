@@ -3,33 +3,35 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from ai_control.operator_notifications import (
+from agentsight.operator_notifications import (
     claim_next_notification,
     enqueue_notification,
     prepare_notification_delivery_draft,
 )
-from ai_control.storage_quota import apply_storage_quota
-from ai_control.tray.ai_status import ai_status_report
-from ai_control.tray.cli import main as tray_cli_main
-from ai_control.tray.cli import ai_help_report
-import ai_control.tray.gui as tray_gui_module
-from ai_control.tray.gui import (
+from agentsight.storage_quota import apply_storage_quota
+from agentsight.tray.ai_status import ai_status_report
+from agentsight.tray.cli import main as tray_cli_main
+from agentsight.tray.cli import ai_help_report
+import agentsight.tray.gui as tray_gui_module
+import agentsight.tray.timeline_viewer as timeline_viewer_module
+from agentsight.tray.gui import (
     IDM_CLEAR_EMERGENCY,
     IDM_EMERGENCY_STOP,
-    IDM_ALLOW_AI_CONTROL,
+    IDM_ALLOW_AGENTSIGHT,
     IDM_LANGUAGE_EN,
     IDM_LANGUAGE_FOLLOW_SYSTEM,
     IDM_LANGUAGE_ZH,
     IDM_OPEN_RECORDING_SETTINGS,
     IDM_OPEN_TIMELINE,
-    IDM_PAUSE_AI_CONTROL,
+    IDM_PAUSE_AGENTSIGHT,
     IDM_STATE_LABEL,
-    IDM_STOP_AI_CONTROL,
+    IDM_STOP_AGENTSIGHT,
     IDM_STATUS,
     NIN_KEYSELECT,
     NIN_SELECT,
@@ -69,7 +71,7 @@ from ai_control.tray.gui import (
     tray_icon_state_is_animated,
     uninstall_tray_gui_resident,
 )
-from ai_control.tray.state import (
+from agentsight.tray.state import (
     apply_recording_policy_settings,
     default_recording_policy,
     default_tray_config_file,
@@ -78,7 +80,7 @@ from ai_control.tray.state import (
     set_recording_policy_flag,
     write_default_tray_config_if_missing,
 )
-from ai_control.tray.viewers import (
+from agentsight.tray.viewers import (
     append_operation_log,
     build_timeline_model,
     materialize_look_preview_cache,
@@ -86,14 +88,39 @@ from ai_control.tray.viewers import (
     public_operation_log_entry,
     read_operation_log,
 )
-from ai_control.tray.timeline_viewer import decode_frame_to_qimage, launch_timeline_viewer_process
+from agentsight.tray.timeline_viewer import decode_frame_to_qimage, launch_timeline_viewer_process
 
 
 class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
+    def _write_timeline_mkv_index(self, local: Path, segment_name: str, timestamps_ms: list[int], *, mtime: int | None = None) -> Path:
+        segment_path = local / "AgentSight" / "runs_host_agent" / "segments" / f"{segment_name}.mkv"
+        segment_path.parent.mkdir(parents=True, exist_ok=True)
+        segment_path.write_bytes(b"")
+        index_path = segment_path.with_suffix(".frames.jsonl")
+        records = []
+        for index, timestamp_ms in enumerate(timestamps_ms):
+            records.append(
+                {
+                    "segment_id": segment_name,
+                    "frame_id": f"{segment_name}-f{index:06d}",
+                    "frame_index": index,
+                    "timestamp_ms": timestamp_ms,
+                    "pts_ms": index * 40,
+                    "playback_pts_ms": index * 40,
+                    "playback_time_basis": "test_index",
+                    "source": "test",
+                }
+            )
+        index_path.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+        if mtime is not None:
+            os.utime(segment_path, (mtime, mtime))
+            os.utime(index_path, (mtime, mtime))
+        return index_path
+
     def test_tray_gui_description_declares_visible_controls_and_boundaries(self) -> None:
         report = build_tray_gui_description()
 
-        self.assertEqual(report["schema"], "ai_control_tray_gui_v1")
+        self.assertEqual(report["schema"], "agentsight_tray_gui_v1")
         self.assertEqual(report["tray_icon_api"], "Shell_NotifyIconW")
         self.assertEqual(report["status_window"], "MessageBoxW")
         self.assertEqual(report["tray_icon_gui_available"], tray_gui_module._is_windows())
@@ -135,16 +162,16 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         self.assertFalse(report["menu_model"]["operation_log_menu_present"])
         self.assertTrue(report["menu_model"]["operation_log_integrated_into_timeline"])
         self.assertFalse(report["physical_hotkey_monitor"]["status_or_describe_starts_monitor"])
-        self.assertEqual(report["recording_configuration"]["schema"], "ai_control_tray_config_v1")
+        self.assertEqual(report["recording_configuration"]["schema"], "agentsight_tray_config_v1")
         self.assertIn("tray-config.jsonc", report["recording_configuration"]["config_path"])
-        self.assertEqual(report["recording_configuration"]["idle_capture_default_fps"], 1.0)
+        self.assertEqual(report["recording_configuration"]["idle_capture_default_fps"], 0.1)
         self.assertEqual(report["recording_configuration"]["idle_capture_min_fps"], 0.1)
-        self.assertEqual(report["recording_configuration"]["action_capture_default_fps"], 10)
-        self.assertTrue(report["recording_configuration"]["action_capture_max_post_action_frames_required"])
+        self.assertEqual(report["recording_configuration"]["action_capture_default_fps"], 1)
+        self.assertFalse(report["recording_configuration"]["action_capture_max_post_action_frames_required"])
         self.assertFalse(report["recording_configuration"]["recording_policy_toggles_in_menu"])
         self.assertEqual(report["recording_configuration"]["settings_viewer"], "modern_scrollable_tkinter_dialog")
         self.assertEqual(report["recording_configuration"]["settings_fallback_viewer"], "native_win32_dialog")
-        self.assertEqual(report["recording_configuration"]["settings_dialog_model"], "ai_control_recording_settings_dialog_v1")
+        self.assertEqual(report["recording_configuration"]["settings_dialog_model"], "agentsight_recording_settings_dialog_v1")
         self.assertEqual(report["recording_configuration"]["timeline_viewer"], "pyside6_qt_native_window")
         self.assertEqual(report["recording_configuration"]["operation_log_viewer"], "integrated_into_timeline_viewer")
         self.assertTrue(report["recording_configuration"]["html_viewer_removed"])
@@ -162,8 +189,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             {
                 IDM_STATUS,
                 IDM_STATE_LABEL,
-                IDM_PAUSE_AI_CONTROL,
-                IDM_ALLOW_AI_CONTROL,
+                IDM_PAUSE_AGENTSIGHT,
+                IDM_ALLOW_AGENTSIGHT,
                 IDM_EMERGENCY_STOP,
                 IDM_CLEAR_EMERGENCY,
                 IDM_OPEN_RECORDING_SETTINGS,
@@ -172,7 +199,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                 IDM_LANGUAGE_FOLLOW_SYSTEM,
                 IDM_LANGUAGE_ZH,
                 IDM_LANGUAGE_EN,
-                IDM_STOP_AI_CONTROL,
+                IDM_STOP_AGENTSIGHT,
             },
         )
         self.assertEqual(
@@ -180,8 +207,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             {
                 "status",
                 "state_label",
-                "pause_ai_control",
-                "allow_ai_control",
+                "pause_agentsight",
+                "allow_agentsight",
                 "emergency_stop",
                 "clear_emergency_stop",
                 "open_recording_settings",
@@ -190,24 +217,24 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                 "language_follow_system",
                 "language_zh",
                 "language_en",
-                "stop_ai_control",
+                "stop_agentsight",
             },
         )
 
     def test_tray_icon_state_and_tooltip_are_derived_from_status_without_semantics(self) -> None:
         cases = [
-            ("ready", "ready", "AI-Control: Ready"),
-            ("operator_control_paused", "paused", "AI-Control: Paused"),
-            ("emergency_stopped", "emergency", "AI-Control: Emergency stop"),
-            ("blocked", "blocked", "AI-Control: Blocked"),
-            ("discovery_missing", "discovery_missing", "AI-Control: Discovery missing"),
-            ("something_new", "unknown", "AI-Control: Unknown"),
+            ("ready", "ready", "AgentSight: Ready"),
+            ("operator_control_paused", "paused", "AgentSight: Paused"),
+            ("emergency_stopped", "emergency", "AgentSight: Emergency stop"),
+            ("blocked", "blocked", "AgentSight: Blocked"),
+            ("discovery_missing", "discovery_missing", "AgentSight: Discovery missing"),
+            ("something_new", "unknown", "AgentSight: Unknown"),
         ]
         for tray_status, icon_state, tooltip in cases:
             status = {"tray_status": tray_status}
             self.assertEqual(tray_icon_state_for_status(status), icon_state)
             self.assertEqual(tray_tooltip_for_status(status, language="en"), tooltip)
-        self.assertEqual(tray_tooltip_for_status({"tray_status": "ready"}, language="zh"), "AI-Control: 可用")
+        self.assertEqual(tray_tooltip_for_status({"tray_status": "ready"}, language="zh"), "AgentSight: 可用")
 
     def test_tray_icon_as_lettermark_animation_model_is_stateful_and_low_frequency(self) -> None:
         self.assertEqual(TRAY_ICON_LETTERMARK, "AS")
@@ -278,8 +305,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
 
         self.assertEqual(items["state_label"]["label"], "State: Paused")
         self.assertFalse(items["state_label"]["enabled"])
-        self.assertFalse(items["pause_ai_control"]["enabled"])
-        self.assertTrue(items["allow_ai_control"]["enabled"])
+        self.assertFalse(items["pause_agentsight"]["enabled"])
+        self.assertTrue(items["allow_agentsight"]["enabled"])
         self.assertFalse(items["clear_emergency_stop"]["enabled"])
         self.assertTrue(items["open_recording_settings"]["enabled"])
         self.assertNotIn("toggle_idle_capture", items)
@@ -305,8 +332,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         submenus = {item["key"]: item for item in menu if item.get("kind") == "submenu"}
 
         self.assertEqual(items["state_label"]["label"], "状态: 可用")
-        self.assertEqual(items["pause_ai_control"]["label"], "暂停 AI 控制")
-        self.assertEqual(items["allow_ai_control"]["label"], "允许 AI 控制")
+        self.assertEqual(items["pause_agentsight"]["label"], "暂停 AI 控制")
+        self.assertEqual(items["allow_agentsight"]["label"], "允许 AI 控制")
         self.assertEqual(items["emergency_stop"]["label"], "紧急停止")
         self.assertEqual(items["open_recording_settings"]["label"], "采集与保留设置")
         self.assertNotIn("toggle_idle_capture", items)
@@ -315,8 +342,39 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         self.assertNotIn("toggle_post_action_frames", items)
         self.assertEqual(items["open_timeline"]["label"], "打开时间线")
         self.assertNotIn("open_operation_log", items)
-        self.assertEqual(items["stop_ai_control"]["label"], "停止 AgentSight")
+        self.assertEqual(items["stop_agentsight"]["label"], "停止 AgentSight")
         self.assertEqual(submenus["language"]["label"], "语言")
+
+    def test_timeline_launcher_prefers_adjacent_packaged_viewer_when_frozen(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dist = Path(temp_dir) / "dist"
+            dist.mkdir()
+            tray_exe = dist / "AgentSightTray.exe"
+            timeline_exe = dist / "AgentSightTimelineViewer.exe"
+            tray_exe.write_text("", encoding="utf-8")
+            timeline_exe.write_text("", encoding="utf-8")
+            process = mock.Mock(pid=4321)
+
+            with mock.patch.object(timeline_viewer_module.sys, "frozen", True, create=True), mock.patch.object(
+                timeline_viewer_module.sys, "executable", str(tray_exe)
+            ), mock.patch.object(
+                timeline_viewer_module, "_stop_existing_timeline_viewers", return_value={"attempted": False}
+            ), mock.patch.object(
+                timeline_viewer_module, "_write_timeline_launch_report"
+            ), mock.patch.object(
+                timeline_viewer_module.subprocess, "Popen", return_value=process
+            ) as popen:
+                report = launch_timeline_viewer_process(mode="timeline")
+
+        self.assertEqual(report["launch_kind"], "packaged_qt_viewer")
+        self.assertEqual(report["command"], [str(timeline_exe), "--mode", "timeline"])
+        self.assertEqual(report["cwd"], str(dist))
+        popen.assert_called_once()
+        kwargs = popen.call_args.kwargs
+        self.assertNotEqual(kwargs.get("creationflags"), getattr(timeline_viewer_module.subprocess, "CREATE_NO_WINDOW", object()))
+        startupinfo = kwargs.get("startupinfo")
+        if startupinfo is not None:
+            self.assertNotEqual(getattr(startupinfo, "wShowWindow", None), 0)
 
     def test_recording_settings_dialog_model_follows_language_and_boundaries(self) -> None:
         policy = default_recording_policy()
@@ -339,20 +397,26 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                 "capture_pre_action_frame",
                 "capture_post_action_frames",
                 "post_action_fps",
-                "post_action_duration_ms",
-                "max_post_action_frames",
+                "post_action_duration_seconds",
                 "retention_days",
-                "max_storage_mb",
-                "min_free_disk_mb",
+                "max_storage_gb",
+                "min_free_disk_gb",
             },
         )
         self.assertEqual(controls["continuous_recording_enabled"]["label"], "平时低频记录")
         self.assertEqual(controls["idle_fps"]["label"], "平时 FPS")
-        self.assertEqual(controls["idle_fps"]["value"], 1.0)
+        self.assertEqual(controls["continuous_recording_enabled"]["checked"], False)
+        self.assertEqual(controls["idle_fps"]["value"], 0.1)
         self.assertEqual(controls["idle_fps"]["min"], 0.1)
-        self.assertEqual(controls["post_action_fps"]["value"], 10)
-        self.assertEqual(controls["max_post_action_frames"]["value"], 100)
-        self.assertTrue(controls["max_post_action_frames"]["required"])
+        self.assertEqual(controls["post_action_fps"]["value"], 1)
+        self.assertEqual(controls["post_action_duration_seconds"]["control_type"], "float")
+        self.assertEqual(controls["post_action_duration_seconds"]["value"], 10)
+        self.assertEqual(controls["post_action_duration_seconds"]["unit"], "seconds")
+        self.assertEqual(controls["max_storage_gb"]["value"], 5)
+        self.assertEqual(controls["max_storage_gb"]["unit"], "GB")
+        self.assertEqual(controls["min_free_disk_gb"]["value"], 5)
+        self.assertEqual(controls["min_free_disk_gb"]["unit"], "GB")
+        self.assertNotIn("max_post_action_frames", controls)
         self.assertFalse(model["host_input_sent"])
         self.assertEqual(model["host_sent_event_count"], 0)
         self.assertFalse(model["boundary"]["clipboard_used"])
@@ -367,6 +431,39 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         zh_summary = status_summary_text({"recording_policy": policy, "paths": {}}, language="zh")
         self.assertIn("平时低频记录已启用", zh_summary)
         self.assertNotIn("连续记录已启用", zh_summary)
+
+    def test_legacy_post_action_duration_ms_round_trips_as_float_seconds_without_precision_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local = Path(temp_dir) / "LocalAppData"
+            roaming = Path(temp_dir) / "Roaming"
+            config_path = local / "AgentSight" / "tray-config.jsonc"
+            env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
+            with mock.patch.dict("os.environ", env, clear=False):
+                write_default_tray_config_if_missing()
+                payload = read_jsonc_file(config_path)
+                payload["recording"]["action_capture"]["post_action_duration_ms"] = 1500
+                payload["max_storage_mb"] = 1536
+                payload["min_free_disk_mb"] = 768
+                config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+                model = build_recording_settings_dialog_model(read_jsonc_file(config_path), language="en")
+                controls = {item["key"]: item for item in model["controls"] if item.get("control_type")}
+                apply_recording_policy_settings(
+                    {
+                        "post_action_duration_seconds": controls["post_action_duration_seconds"]["value"],
+                        "max_storage_gb": controls["max_storage_gb"]["value"],
+                        "min_free_disk_gb": controls["min_free_disk_gb"]["value"],
+                    }
+                )
+                updated = read_jsonc_file(config_path)
+
+        self.assertEqual(controls["post_action_duration_seconds"]["control_type"], "float")
+        self.assertEqual(controls["post_action_duration_seconds"]["value"], 1.5)
+        self.assertEqual(updated["recording"]["action_capture"]["post_action_duration_ms"], 1500)
+        self.assertEqual(controls["max_storage_gb"]["value"], 1.5)
+        self.assertEqual(updated["max_storage_mb"], 1536)
+        self.assertEqual(controls["min_free_disk_gb"]["value"], 0.75)
+        self.assertEqual(updated["min_free_disk_mb"], 768)
 
     def test_tray_recording_config_defaults_are_written_as_user_visible_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -383,17 +480,19 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         self.assertTrue(config_path.name.endswith("tray-config.jsonc"))
         self.assertEqual(status["paths"]["tray_config_file"], str(config_path))
         policy = status["recording_policy"]
-        self.assertEqual(policy["schema"], "ai_control_tray_config_v1")
-        self.assertEqual(policy["recording"]["idle_capture"]["fps"], 1.0)
+        self.assertEqual(policy["schema"], "agentsight_tray_config_v1")
+        self.assertFalse(policy["continuous_recording_enabled"])
+        self.assertFalse(policy["recording"]["idle_capture"]["enabled"])
+        self.assertEqual(policy["recording"]["idle_capture"]["fps"], 0.1)
         self.assertNotIn("interval_ms", policy["recording"]["idle_capture"])
         self.assertTrue(policy["recording"]["action_capture"]["capture_pre_action_frame"])
         self.assertTrue(policy["recording"]["action_capture"]["capture_post_action_frames"])
-        self.assertEqual(policy["recording"]["action_capture"]["post_action_fps"], 10)
+        self.assertEqual(policy["recording"]["action_capture"]["post_action_fps"], 1)
         self.assertEqual(policy["recording"]["action_capture"]["post_action_duration_ms"], 10000)
-        self.assertEqual(policy["recording"]["action_capture"]["max_post_action_frames"], 100)
+        self.assertNotIn("max_post_action_frames", policy["recording"]["action_capture"])
         self.assertEqual(policy["retention_days"], 30)
         self.assertEqual(policy["max_storage_mb"], 5120)
-        self.assertEqual(policy["min_free_disk_mb"], 1024)
+        self.assertEqual(policy["min_free_disk_mb"], 5120)
         self.assertNotIn("daily_segment_boundary_local_time", policy)
         self.assertNotIn("segment", policy["recording"])
         self.assertNotIn("operation_capture_enabled", policy)
@@ -422,11 +521,10 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                         "capture_pre_action_frame": False,
                         "capture_post_action_frames": True,
                         "post_action_fps": 12,
-                        "post_action_duration_ms": 5000,
-                        "max_post_action_frames": 60,
+                        "post_action_duration_seconds": 5,
                         "retention_days": 14,
-                        "max_storage_mb": 2048,
-                        "min_free_disk_mb": 1536,
+                        "max_storage_gb": 2,
+                        "min_free_disk_gb": 1.5,
                         "daily_segment_boundary_local_time": "03:30",
                         "segment_bucket_granularity": "hourly",
                         "segment_image_encoding": "png",
@@ -451,7 +549,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         self.assertFalse(policy["recording"]["action_capture"]["capture_pre_action_frame"])
         self.assertEqual(policy["recording"]["action_capture"]["post_action_fps"], 12)
         self.assertEqual(policy["recording"]["action_capture"]["post_action_duration_ms"], 5000)
-        self.assertEqual(policy["recording"]["action_capture"]["max_post_action_frames"], 60)
+        self.assertNotIn("max_post_action_frames", policy["recording"]["action_capture"])
         self.assertNotIn("segment", policy["recording"])
         self.assertEqual(policy["retention_days"], 14)
         self.assertEqual(policy["max_storage_mb"], 2048)
@@ -467,7 +565,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             local = Path(temp_dir) / "LocalAppData"
             roaming = Path(temp_dir) / "Roaming"
-            config_path = local / "ai-control" / "tray-config.jsonc"
+            config_path = local / "AgentSight" / "tray-config.jsonc"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
                 write_default_tray_config_if_missing()
@@ -486,7 +584,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                media_dir = local / "ai-control" / "runs_host_agent" / "session-test" / "media"
+                media_dir = local / "AgentSight" / "runs_host_agent" / "session-test" / "media"
                 media_dir.mkdir(parents=True)
                 from PIL import Image
 
@@ -510,25 +608,32 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         self.assertEqual(model["operation_log_attachments"], [])
         self.assertEqual(model["frames"], [])
 
-    def test_storage_quota_prunes_old_agseg_and_matching_operation_logs(self) -> None:
+    def test_storage_quota_prunes_old_mkv_and_matching_operation_logs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             local = Path(temp_dir) / "LocalAppData"
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                from PIL import Image
-                from ai_control.segments import BinarySegmentWriter
+                from agentsight.segments import MkvSegmentWriter
 
-                agent_dir = local / "ai-control"
-                segment_path = agent_dir / "runs_host_agent" / "segments" / "agentsight-20260621-00.agseg"
-                writer = BinarySegmentWriter.create(segment_path, segment_id="agentsight-20260621-00")
+                agent_dir = local / "AgentSight"
+                segment_path = agent_dir / "runs_host_agent" / "segments" / "agentsight-20260621-00.mkv"
+                writer = MkvSegmentWriter(segment_path, segment_id="agentsight-20260621-00", width=8, height=8)
                 writer.add_frame(
-                    Image.new("RGB", (8, 8), (20, 20, 20)),
+                    bytes([20, 20, 20, 255]) * 64,
+                    captured_at_ms=1781971200000,
                     timestamp_iso="2026-06-21T00:00:00+00:00",
-                    timestamp_monotonic_ms=1,
                     source="idle",
+                    event_id="quota-old",
+                    cursor_mode="none",
+                    capture_content_degenerate=False,
+                    screen_region={"x": 0, "y": 0, "width": 8, "height": 8},
+                    coordinate_system="virtual_screen_pixels",
                 )
                 writer.close()
+                protected_evidence = agent_dir / "runs_host_agent" / "evidence" / "keep.txt"
+                protected_evidence.parent.mkdir(parents=True, exist_ok=True)
+                protected_evidence.write_text("must not be quota-pruned by this isolated test", encoding="utf-8")
                 log_path = agent_dir / "operation-log.jsonl"
                 log_path.parent.mkdir(parents=True, exist_ok=True)
                 log_path.write_text(
@@ -538,10 +643,16 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                 )
                 report = apply_storage_quota(root=agent_dir, config={"max_storage_mb": 1, "min_free_disk_mb": 999999999})
                 segment_exists_after = segment_path.exists()
+                index_exists_after = segment_path.with_suffix(".frames.jsonl").exists()
+                manifest_exists_after = segment_path.with_suffix(".manifest.json").exists()
+                protected_evidence_exists_after = protected_evidence.exists()
                 remaining = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
 
         self.assertTrue(report["deleted_count"] >= 1, report)
         self.assertFalse(segment_exists_after)
+        self.assertFalse(index_exists_after)
+        self.assertFalse(manifest_exists_after)
+        self.assertTrue(protected_evidence_exists_after)
         self.assertTrue(report["operation_log_prune"]["pruned"])
         self.assertNotIn("/look", remaining)
         self.assertIn("/screen", remaining)
@@ -553,10 +664,10 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                agent_dir = local / "ai-control"
+                agent_dir = local / "AgentSight"
                 agent_dir.mkdir(parents=True, exist_ok=True)
                 (agent_dir / "tray-settings.json").write_text(
-                    json.dumps({"schema": "ai_control_tray_settings_v1", "language": "en"}),
+                    json.dumps({"schema": "agentsight_tray_settings_v1", "language": "en"}),
                     encoding="utf-8",
                 )
                 append_operation_log(
@@ -606,7 +717,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             request={"op": "do", "id": "act-1"},
             response={
                 "object_type": "DoResult",
-                "schema": "ai_control_do_v1",
+                "schema": "agentsight_do_v1",
                 "ok": True,
                 "status": "done",
                 "input": {"sent": True, "host_event_count": 4, "step_count": 3},
@@ -626,7 +737,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             request={"op": "do", "id": "act-conflict"},
             response={
                 "object_type": "DoResult",
-                "schema": "ai_control_do_v1",
+                "schema": "agentsight_do_v1",
                 "ok": True,
                 "status": "done",
                 "host_input_sent": False,
@@ -648,7 +759,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             request={"op": "do", "id": "act-segment"},
             response={
                 "object_type": "DoResult",
-                "schema": "ai_control_do_v1",
+                "schema": "agentsight_do_v1",
                 "ok": True,
                 "status": "done",
                 "input": {"sent": True, "host_event_count": 3, "step_count": 1},
@@ -756,7 +867,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                     "cursor_mode": "none",
                     "raw_or_derived": "derived_review_only",
                     "transform": {
-                        "schema": "ai_control_view_transform_v1",
+                        "schema": "agentsight_view_transform_v1",
                         "view_pixels_to_virtual_screen_pixels": {"origin_x": 10, "origin_y": 20, "scale_x": 10, "scale_y": 10},
                     },
                 },
@@ -842,9 +953,9 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
                 from PIL import Image
-                from ai_control.segments import BinarySegmentWriter
+                from agentsight.segments import BinarySegmentWriter
 
-                segment_path = local / "ai-control" / "runs_host_agent" / "segments" / "look-preview-cli.agseg"
+                segment_path = local / "AgentSight" / "runs_host_agent" / "segments" / "look-preview-cli.agseg"
                 writer = BinarySegmentWriter.create(segment_path, segment_id="look-preview-cli")
                 record = writer.add_frame(
                     Image.new("RGBA", (20, 16), (30, 100, 210, 255)),
@@ -945,7 +1056,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
 
     def test_tray_cli_look_preview_unknown_subcommand_uses_json_when_argv_is_none(self) -> None:
         stdout = io.StringIO()
-        with mock.patch("sys.argv", ["ai-control-tray", "look-preview", "bogus"]):
+        with mock.patch("sys.argv", ["agentsight-tray", "look-preview", "bogus"]):
             with contextlib.redirect_stdout(stdout):
                 exit_code = tray_cli_main()
         report = json.loads(stdout.getvalue())
@@ -1038,7 +1149,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             }
         ]
 
-        from ai_control.tray.viewers import _attach_operation_logs_to_frames
+        from agentsight.tray.viewers import _attach_operation_logs_to_frames
 
         attachments = _attach_operation_logs_to_frames(frames, logs)
 
@@ -1053,9 +1164,9 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
                 from PIL import Image
-                from ai_control.segments import SegmentWriter
+                from agentsight.segments import SegmentWriter
 
-                segment_dir = local / "ai-control" / "runs_host_agent" / "session-test" / "segments" / "segment-seg-ui"
+                segment_dir = local / "AgentSight" / "runs_host_agent" / "session-test" / "segments" / "segment-seg-ui"
                 writer = SegmentWriter.create(segment_dir, segment_id="seg-ui")
                 record = writer.add_frame(
                     Image.new("RGBA", (12, 8), (40, 120, 220, 255)),
@@ -1094,9 +1205,9 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
                 from PIL import Image
-                from ai_control.segments import BinarySegmentWriter
+                from agentsight.segments import BinarySegmentWriter
 
-                segment_path = local / "ai-control" / "runs_host_agent" / "session-test" / "segments" / "seg-ui-bin.agseg"
+                segment_path = local / "AgentSight" / "runs_host_agent" / "session-test" / "segments" / "seg-ui-bin.agseg"
                 writer = BinarySegmentWriter.create(segment_path, segment_id="seg-ui-bin")
                 record = writer.add_frame(
                     Image.new("RGBA", (13, 9), (30, 160, 120, 255)),
@@ -1127,7 +1238,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                         "host_sent_event_count": 3,
                     }
                 )
-                model = build_timeline_model()
+                model = build_timeline_model(duration_limit_ms=None)
 
                 segment_frames = [frame for frame in model["frames"] if frame.get("segment_id") == "seg-ui-bin"]
                 self.assertEqual(len(segment_frames), 1)
@@ -1141,13 +1252,93 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                 self.assertEqual(model["operation_log_attachments"][0]["attachment_basis"], "segment_frame_id")
                 self.assertEqual(segment_frames[0]["operation_log_indexes"], [0])
 
+    def test_timeline_initial_window_sparse_hour_does_not_backfill_to_500(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local = Path(temp_dir) / "LocalAppData"
+            roaming = Path(temp_dir) / "Roaming"
+            env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
+            right_wall_ms = 10_000_000
+            old_timestamps = [right_wall_ms - 7_200_000 + index * 1_000 for index in range(300)]
+            recent_timestamps = [right_wall_ms - 199_000 + index * 1_000 for index in range(200)]
+            with mock.patch.dict("os.environ", env, clear=False):
+                self._write_timeline_mkv_index(local, "agentsight-old", old_timestamps)
+                self._write_timeline_mkv_index(local, "agentsight-recent", recent_timestamps)
+                model = build_timeline_model(max_frames=500, max_logs=10, right_wall_ms=right_wall_ms)
+
+        self.assertEqual(model["frame_count"], 200)
+        self.assertEqual([frame["timestamp_ms"] for frame in model["frames"]], recent_timestamps)
+        config = model["timeline_config"]
+        self.assertEqual(config["loaded_frame_count"], 200)
+        self.assertEqual(config["duration_limit_ms"], 3_600_000)
+        self.assertEqual(config["frame_limit"], 500)
+
+    def test_timeline_initial_window_high_frequency_caps_at_500(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local = Path(temp_dir) / "LocalAppData"
+            roaming = Path(temp_dir) / "Roaming"
+            env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
+            right_wall_ms = 10_000_000
+            timestamps = [right_wall_ms - (699 - index) * 3_600 for index in range(700)]
+            with mock.patch.dict("os.environ", env, clear=False):
+                self._write_timeline_mkv_index(local, "agentsight-high-frequency", timestamps)
+                model = build_timeline_model(max_frames=500, max_logs=10, right_wall_ms=right_wall_ms)
+
+        selected_timestamps = [frame["timestamp_ms"] for frame in model["frames"]]
+        self.assertEqual(model["frame_count"], 500)
+        self.assertEqual(selected_timestamps, timestamps[-500:])
+        self.assertGreater(selected_timestamps[0], right_wall_ms - 3_600_000)
+
+    def test_timeline_initial_window_includes_boundaries_and_excludes_future(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local = Path(temp_dir) / "LocalAppData"
+            roaming = Path(temp_dir) / "Roaming"
+            env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
+            right_wall_ms = 10_000_000
+            timestamps = [right_wall_ms - 3_600_001, right_wall_ms - 3_600_000, right_wall_ms, right_wall_ms + 1]
+            with mock.patch.dict("os.environ", env, clear=False):
+                self._write_timeline_mkv_index(local, "agentsight-boundaries", timestamps)
+                model = build_timeline_model(max_frames=500, max_logs=10, right_wall_ms=right_wall_ms)
+
+        self.assertEqual([frame["timestamp_ms"] for frame in model["frames"]], [right_wall_ms - 3_600_000, right_wall_ms])
+        self.assertEqual(model["timeline_config"]["future_frame_count_excluded"], 1)
+
+    def test_timeline_window_sorts_across_segments_by_timestamp_not_mtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local = Path(temp_dir) / "LocalAppData"
+            roaming = Path(temp_dir) / "Roaming"
+            env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
+            right_wall_ms = 10_000_000
+            with mock.patch.dict("os.environ", env, clear=False):
+                self._write_timeline_mkv_index(local, "agentsight-newer-mtime", [right_wall_ms - 20_000, right_wall_ms], mtime=300)
+                self._write_timeline_mkv_index(local, "agentsight-older-mtime", [right_wall_ms - 10_000], mtime=100)
+                model = build_timeline_model(max_frames=2, max_logs=10, right_wall_ms=right_wall_ms)
+
+        self.assertEqual([frame["timestamp_ms"] for frame in model["frames"]], [right_wall_ms - 10_000, right_wall_ms])
+
+    def test_timeline_manual_history_count_only_can_load_older_than_one_hour(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local = Path(temp_dir) / "LocalAppData"
+            roaming = Path(temp_dir) / "Roaming"
+            env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
+            right_wall_ms = 10_000_000
+            timestamps = [right_wall_ms - 7_200_000 + index * 10_000 for index in range(700)]
+            with mock.patch.dict("os.environ", env, clear=False):
+                self._write_timeline_mkv_index(local, "agentsight-manual-history", timestamps)
+                model = build_timeline_model(max_frames=600, max_logs=10, right_wall_ms=right_wall_ms, duration_limit_ms=None)
+
+        selected_timestamps = [frame["timestamp_ms"] for frame in model["frames"]]
+        self.assertEqual(model["frame_count"], 600)
+        self.assertEqual(selected_timestamps, timestamps[-600:])
+        self.assertLess(selected_timestamps[0], right_wall_ms - 3_600_000)
+        self.assertIsNone(model["timeline_config"]["duration_limit_ms"])
+
     def test_timeline_open_does_not_generate_previews_from_derived_png_media(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             local = Path(temp_dir) / "LocalAppData"
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                media_dir = local / "ai-control" / "runs_host_agent" / "session-test" / "media"
+                media_dir = local / "AgentSight" / "runs_host_agent" / "session-test" / "media"
                 media_dir.mkdir(parents=True)
                 from PIL import Image
 
@@ -1169,12 +1360,12 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         app._refresh_icon = mock.Mock()
         app._message_box = mock.Mock()
 
-        with mock.patch("ai_control.tray.gui.pause_ai_control") as pause:
-            with mock.patch("ai_control.tray.gui.allow_ai_control") as allow:
-                with mock.patch("ai_control.tray.gui.emergency_stop") as emergency:
-                    with mock.patch("ai_control.tray.gui.clear_emergency") as clear:
-                        app._handle_command(IDM_PAUSE_AI_CONTROL)
-                        app._handle_command(IDM_ALLOW_AI_CONTROL)
+        with mock.patch("agentsight.tray.gui.pause_agentsight") as pause:
+            with mock.patch("agentsight.tray.gui.allow_agentsight") as allow:
+                with mock.patch("agentsight.tray.gui.emergency_stop") as emergency:
+                    with mock.patch("agentsight.tray.gui.clear_emergency") as clear:
+                        app._handle_command(IDM_PAUSE_AGENTSIGHT)
+                        app._handle_command(IDM_ALLOW_AGENTSIGHT)
                         app._handle_command(IDM_EMERGENCY_STOP)
                         app._handle_command(IDM_CLEAR_EMERGENCY)
 
@@ -1189,8 +1380,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         app = object.__new__(Win32TrayApp)
         app._show_recording_settings_dialog = mock.Mock()
 
-        with mock.patch("ai_control.tray.gui.write_default_tray_config_if_missing", return_value={"config_file": "tray-config.jsonc"}) as write_config:
-            with mock.patch("ai_control.tray.gui.os.startfile", create=True) as startfile:
+        with mock.patch("agentsight.tray.gui.write_default_tray_config_if_missing", return_value={"config_file": "tray-config.jsonc"}) as write_config:
+            with mock.patch("agentsight.tray.gui.os.startfile", create=True) as startfile:
                 app._handle_command(IDM_OPEN_RECORDING_SETTINGS)
 
         write_config.assert_called_once()
@@ -1199,28 +1390,125 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
 
     def test_open_timeline_and_log_launch_native_qt_viewer_process(self) -> None:
         app = object.__new__(Win32TrayApp)
-        with mock.patch("ai_control.tray.gui.launch_timeline_viewer_process") as launch:
+        with mock.patch("agentsight.tray.gui.launch_timeline_viewer_process") as launch:
             app._handle_command(IDM_OPEN_TIMELINE)
 
         self.assertEqual(launch.call_args_list[0].kwargs["mode"], "timeline")
         self.assertEqual(launch.call_count, 1)
 
     def test_native_timeline_viewer_launches_without_html_generation(self) -> None:
-        with mock.patch("ai_control.tray.timeline_viewer.subprocess.Popen") as popen:
-            popen.return_value.pid = 4242
-            report = launch_timeline_viewer_process(mode="timeline")
+        with mock.patch(
+            "agentsight.tray.timeline_viewer._stop_existing_timeline_viewers",
+            return_value={"attempted": False, "reason": "test_mock"},
+        ) as stop_existing:
+            with mock.patch("agentsight.tray.timeline_viewer.subprocess.Popen") as popen:
+                popen.return_value.pid = 4242
+                report = launch_timeline_viewer_process(mode="timeline")
 
+        stop_existing.assert_called_once()
         self.assertEqual(report["viewer"], "pyside6_qt_native_window")
         self.assertEqual(report["mode"], "timeline")
+        self.assertEqual(report["stopped_existing_viewers"]["reason"], "test_mock")
         self.assertIn("-m", popen.call_args.args[0])
-        self.assertIn("ai_control.tray.timeline_viewer", popen.call_args.args[0])
+        self.assertIn("agentsight.tray.timeline_viewer", popen.call_args.args[0])
         self.assertFalse(report["boundary"]["clipboard_used"])
         self.assertEqual(report["host_sent_event_count"], 0)
+        kwargs = popen.call_args.kwargs
+        self.assertNotEqual(kwargs.get("creationflags"), getattr(timeline_viewer_module.subprocess, "CREATE_NO_WINDOW", object()))
+        startupinfo = kwargs.get("startupinfo")
+        if startupinfo is not None:
+            self.assertNotEqual(getattr(startupinfo, "wShowWindow", None), 0)
+
+    def test_packaged_tray_prefers_adjacent_timeline_viewer_exe_over_source_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            packaged_viewer = Path(temp_dir) / "dist" / "AgentSightTimelineViewer.exe"
+            packaged_viewer.parent.mkdir(parents=True)
+            packaged_viewer.write_text("stub", encoding="utf-8")
+            source_root = Path(temp_dir) / "source-root"
+            source_root.mkdir()
+
+            with mock.patch("agentsight.tray.timeline_viewer._packaged_timeline_viewer_exe", return_value=packaged_viewer):
+                with mock.patch("agentsight.tray.timeline_viewer._source_repo_root_for_launcher", return_value=source_root):
+                    with mock.patch(
+                        "agentsight.tray.timeline_viewer._stop_existing_timeline_viewers",
+                        return_value={"attempted": False, "reason": "test_mock"},
+                    ):
+                        with mock.patch("agentsight.tray.timeline_viewer.subprocess.Popen") as popen:
+                            popen.return_value.pid = 4242
+                            report = launch_timeline_viewer_process(mode="timeline")
+
+        self.assertEqual(report["launch_kind"], "packaged_qt_viewer")
+        self.assertEqual(popen.call_args.args[0][0], str(packaged_viewer))
+        self.assertNotIn("-m", popen.call_args.args[0])
+        kwargs = popen.call_args.kwargs
+        self.assertNotEqual(kwargs.get("creationflags"), getattr(timeline_viewer_module.subprocess, "CREATE_NO_WINDOW", object()))
+        startupinfo = kwargs.get("startupinfo")
+        if startupinfo is not None:
+            self.assertNotEqual(getattr(startupinfo, "wShowWindow", None), 0)
+
+    def test_timeline_click_seek_policy_rejects_stale_playback_callbacks(self) -> None:
+        self.assertFalse(
+            timeline_viewer_module._timeline_playback_can_update_selection(
+                playback_timer_active=False,
+                syncing_to_player=False,
+            )
+        )
+        self.assertFalse(
+            timeline_viewer_module._timeline_playback_can_update_selection(
+                playback_timer_active=True,
+                syncing_to_player=True,
+            )
+        )
+        self.assertTrue(
+            timeline_viewer_module._timeline_playback_can_update_selection(
+                playback_timer_active=True,
+                syncing_to_player=False,
+            )
+        )
+        self.assertFalse(
+            timeline_viewer_module._timeline_segment_end_can_advance(
+                playback_timer_active=False,
+                pending_seek_ms=None,
+            )
+        )
+        self.assertFalse(
+            timeline_viewer_module._timeline_segment_end_can_advance(
+                playback_timer_active=True,
+                pending_seek_ms=120,
+            )
+        )
+        self.assertTrue(
+            timeline_viewer_module._timeline_segment_end_can_advance(
+                playback_timer_active=True,
+                pending_seek_ms=None,
+            )
+        )
+        self.assertFalse(
+            timeline_viewer_module._timeline_user_selection_should_emit(
+                selected_index=4,
+                nearest_index=4,
+                force=False,
+            )
+        )
+        self.assertTrue(
+            timeline_viewer_module._timeline_user_selection_should_emit(
+                selected_index=4,
+                nearest_index=4,
+                force=True,
+            )
+        )
+        self.assertTrue(
+            timeline_viewer_module._timeline_user_selection_should_emit(
+                selected_index=4,
+                nearest_index=5,
+                force=False,
+            )
+        )
 
     def test_native_timeline_decodes_agseg_frame_in_memory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             from PIL import Image
-            from ai_control.segments import BinarySegmentWriter
+            from agentsight.segments import BinarySegmentWriter
 
             segment_path = Path(temp_dir) / "segments" / "agentsight-test.agseg"
             writer = BinarySegmentWriter.create(segment_path, segment_id="agentsight-test")
@@ -1257,7 +1545,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                 saved = save_tray_language("zh")
                 self.assertEqual(saved["language"], "zh")
                 self.assertEqual(load_tray_settings()["language"], "zh")
-                self.assertEqual(tray_settings_path(), local / "ai-control" / "tray-settings.json")
+                self.assertEqual(tray_settings_path(), local / "AgentSight" / "tray-settings.json")
 
     def test_dynamic_tray_menu_model_handles_emergency_and_discovery_missing_states(self) -> None:
         emergency = build_tray_menu_model(
@@ -1278,8 +1566,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         missing = build_tray_menu_model({"tray_status": "discovery_missing", "controls": {}}, language="en")
         missing_items = {item["key"]: item for item in missing if item.get("kind") == "item"}
         self.assertEqual(missing_items["state_label"]["label"], "State: Discovery missing")
-        self.assertFalse(missing_items["pause_ai_control"]["enabled"])
-        self.assertFalse(missing_items["allow_ai_control"]["enabled"])
+        self.assertFalse(missing_items["pause_agentsight"]["enabled"])
+        self.assertFalse(missing_items["allow_agentsight"]["enabled"])
         self.assertTrue(missing_items["emergency_stop"]["enabled"])
 
     def test_tray_callback_events_support_legacy_and_notifyicon_v4_messages(self) -> None:
@@ -1303,7 +1591,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                agent_dir = local / "ai-control"
+                agent_dir = local / "AgentSight"
                 agent_dir.mkdir(parents=True)
                 (agent_dir / "host-agent.json").write_text(
                     json.dumps({"pid": 5678, "token": "secret-token", "url": "http://127.0.0.1:8765"}),
@@ -1323,7 +1611,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                 text = status_summary_text(status, language="en")
                 zh_text = status_summary_text(status, language="zh")
 
-        self.assertIn("AI-Control", text)
+        self.assertIn("AgentSight", text)
         self.assertIn("Tray status: Ready", text)
         self.assertIn("Host Agent PID: 5678", text)
         self.assertIn("AI real control enabled: True", text)
@@ -1340,7 +1628,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                agent_dir = local / "ai-control"
+                agent_dir = local / "AgentSight"
                 agent_dir.mkdir(parents=True)
                 (agent_dir / "host-agent.json").write_text(
                     json.dumps({"pid": 5678, "url": "http://127.0.0.1:8765"}),
@@ -1377,7 +1665,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                agent_dir = local / "ai-control"
+                agent_dir = local / "AgentSight"
                 agent_dir.mkdir(parents=True)
                 (agent_dir / "host-agent.json").write_text(
                     json.dumps({"pid": 5678, "url": "http://127.0.0.1:8765"}),
@@ -1418,7 +1706,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             with mock.patch.dict("os.environ", env, clear=False):
                 status = load_tray_status()
 
-        self.assertEqual(status["controls"]["tray_icon_gui_entrypoint"], "ai-control-tray-gui")
+        self.assertEqual(status["controls"]["tray_icon_gui_entrypoint"], "agentsight-tray-gui")
         self.assertEqual(status["controls"]["tray_icon_gui_available"], tray_gui_module._is_windows())
         self.assertEqual(
             status["controls"]["physical_emergency_hotkey"]["tray_gui_starts_monitor_by_default"],
@@ -1432,7 +1720,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             report = json.loads(output.read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(report["object_type"], "AIControlTrayGuiDescription")
+        self.assertEqual(report["object_type"], "AgentSightTrayDescription")
         self.assertFalse(report["boundary"]["window_semantics_used"])
 
     def test_console_tray_cli_can_describe_gui_for_packaged_runtime_diagnostics(self) -> None:
@@ -1441,7 +1729,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         report = json.loads("".join(call.args[0] for call in stdout.write.call_args_list))
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(report["object_type"], "AIControlTrayGuiDescription")
+        self.assertEqual(report["object_type"], "AgentSightTrayDescription")
         self.assertTrue(report["menu_model"]["dynamic_from_tray_status"])
         self.assertTrue(report["tray_icon_state_model"]["transparent_background"])
         self.assertFalse(report["menu_model"]["clipboard_action_present"])
@@ -1454,7 +1742,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         with mock.patch("platform.system", side_effect=AssertionError("platform.system must not run during describe")):
             report = build_tray_gui_description()
 
-        self.assertEqual(report["object_type"], "AIControlTrayGuiDescription")
+        self.assertEqual(report["object_type"], "AgentSightTrayDescription")
         self.assertIsInstance(report["tray_icon_gui_available"], bool)
         self.assertFalse(report["host_input_sent"])
 
@@ -1488,7 +1776,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             physical_hotkey_monitor_requested=True,
         )
 
-        self.assertEqual(report["object_type"], "AIControlTrayGuiAlreadyRunningReport")
+        self.assertEqual(report["object_type"], "AgentSightTrayAlreadyRunningReport")
         self.assertEqual(report["run_status"], "already_running")
         self.assertTrue(report["single_instance_guard"])
         self.assertTrue(report["tray_window_present"])
@@ -1502,8 +1790,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
     def test_gui_run_exits_without_second_window_when_tray_window_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "already-running.json"
-            with mock.patch("ai_control.tray.gui._tray_window_present", return_value=True):
-                with mock.patch("ai_control.tray.gui.Win32TrayApp") as app_cls:
+            with mock.patch("agentsight.tray.gui._tray_window_present", return_value=True):
+                with mock.patch("agentsight.tray.gui.Win32TrayApp") as app_cls:
                     exit_code = tray_gui_main(["run", "--seconds", "1", "--output", str(output)])
             report = json.loads(output.read_text(encoding="utf-8"))
 
@@ -1520,8 +1808,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         app.hotkey_start_report = None
         app.user32 = mock.Mock()
 
-        with mock.patch("ai_control.tray.gui._is_windows", return_value=True):
-            with mock.patch("ai_control.tray.gui.EmergencyHotkeyMonitor") as monitor_cls:
+        with mock.patch("agentsight.tray.gui._is_windows", return_value=True):
+            with mock.patch("agentsight.tray.gui.EmergencyHotkeyMonitor") as monitor_cls:
                 monitor = monitor_cls.return_value
                 monitor.start.return_value = {
                     "hotkey_status": "monitoring",
@@ -1554,10 +1842,10 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                with mock.patch("ai_control.tray.gui._tray_window_present", return_value=True):
+                with mock.patch("agentsight.tray.gui._tray_window_present", return_value=True):
                     report = tray_gui_resident_status()
 
-        self.assertEqual(report["schema"], "ai_control_tray_resident_v1")
+        self.assertEqual(report["schema"], "agentsight_tray_resident_v1")
         self.assertEqual(report["resident_role"], "human_visible_tray_presence")
         self.assertTrue(report["tray_window_present"])
         self.assertTrue(report["tray_icon_expected_visible"])
@@ -1573,8 +1861,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                with mock.patch("ai_control.tray.gui._install_tray_onlogon_task") as install_task:
-                    install_task.return_value = {"task_name": "AIControlTrayGuiOnLogon", "install_status": "installed"}
+                with mock.patch("agentsight.tray.gui._install_tray_onlogon_task") as install_task:
+                    install_task.return_value = {"task_name": "AgentSightTrayOnLogon", "install_status": "installed"}
 
                     report = install_tray_gui_resident(
                         repo_root=root,
@@ -1590,7 +1878,7 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                 self.assertEqual(report["install_mode"], "source_python")
                 self.assertTrue(command_path.exists())
                 self.assertTrue(vbs_path.exists())
-                self.assertIn("-m ai_control.tray.gui watchdog", command_path.read_text(encoding="utf-8"))
+                self.assertIn("-m agentsight.tray.gui watchdog", command_path.read_text(encoding="utf-8"))
                 self.assertIn(str(command_path), vbs_path.read_text(encoding="ascii"))
                 self.assertFalse(report["host_input_sent"])
                 self.assertEqual(report["host_sent_event_count"], 0)
@@ -1608,8 +1896,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                with mock.patch("ai_control.tray.gui._install_tray_onlogon_task") as install_task:
-                    install_task.return_value = {"task_name": "AIControlTrayGuiOnLogon", "install_status": "install_failed"}
+                with mock.patch("agentsight.tray.gui._install_tray_onlogon_task") as install_task:
+                    install_task.return_value = {"task_name": "AgentSightTrayOnLogon", "install_status": "install_failed"}
                     install_tray_gui_resident(
                         repo_root=Path(temp_dir) / "repo",
                         python_command="py",
@@ -1617,11 +1905,11 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                         start_now=False,
                         wait_seconds=0.0,
                     )
-                with mock.patch("ai_control.tray.gui._run_tray_onlogon_task") as run_task:
+                with mock.patch("agentsight.tray.gui._run_tray_onlogon_task") as run_task:
                     run_task.return_value = {"start_method_used": "onlogon_task", "started": False}
-                    with mock.patch("ai_control.tray.gui._start_via_startup_vbs") as start_vbs:
+                    with mock.patch("agentsight.tray.gui._start_via_startup_vbs") as start_vbs:
                         start_vbs.return_value = {"start_method_used": "startup_vbs", "started": True}
-                        with mock.patch("ai_control.tray.gui._wait_for_tray_window", return_value=True):
+                        with mock.patch("agentsight.tray.gui._wait_for_tray_window", return_value=True):
                             report = start_installed_tray_gui_resident(start_method="auto", wait_seconds=0.0)
 
         self.assertEqual(report["start_status"], "started")
@@ -1637,9 +1925,9 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                with mock.patch("ai_control.tray.gui._tray_window_present", side_effect=[False, True]):
-                    with mock.patch("ai_control.tray.gui._start_tray_gui_child") as start_child:
-                        start_child.return_value = {"started": True, "pid": 1234, "command": ["py", "-m", "ai_control.tray.gui", "run"]}
+                with mock.patch("agentsight.tray.gui._tray_window_present", side_effect=[False, True]):
+                    with mock.patch("agentsight.tray.gui._start_tray_gui_child") as start_child:
+                        start_child.return_value = {"started": True, "pid": 1234, "command": ["py", "-m", "agentsight.tray.gui", "run"]}
 
                         exit_code = run_tray_gui_watchdog(interval_seconds=0.5, once=True, output=str(output))
 
@@ -1658,8 +1946,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                with mock.patch("ai_control.tray.gui._install_tray_onlogon_task") as install_task:
-                    install_task.return_value = {"task_name": "AIControlTrayGuiOnLogon", "install_status": "installed"}
+                with mock.patch("agentsight.tray.gui._install_tray_onlogon_task") as install_task:
+                    install_task.return_value = {"task_name": "AgentSightTrayOnLogon", "install_status": "installed"}
                     report = install_tray_gui_resident(
                         repo_root=Path(temp_dir) / "repo",
                         python_command="py",
@@ -1669,8 +1957,8 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
                     )
                 command_path = Path(report["watchdog_command"])
                 vbs_path = Path(report["startup_launcher"])
-                with mock.patch("ai_control.tray.gui._delete_tray_onlogon_task") as delete_task:
-                    delete_task.return_value = {"task_name": "AIControlTrayGuiOnLogon", "delete_status": "deleted"}
+                with mock.patch("agentsight.tray.gui._delete_tray_onlogon_task") as delete_task:
+                    delete_task.return_value = {"task_name": "AgentSightTrayOnLogon", "delete_status": "deleted"}
 
                     uninstall = uninstall_tray_gui_resident(stop_running=False)
 
@@ -1690,12 +1978,12 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
             with mock.patch.dict("os.environ", env, clear=False):
-                with mock.patch("ai_control.tray.gui._tray_window_present", return_value=False):
+                with mock.patch("agentsight.tray.gui._tray_window_present", return_value=False):
                     exit_code = tray_gui_main(["status-resident", "--output", str(output)])
                 report = json.loads(output.read_text(encoding="utf-8"))
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(report["object_type"], "AIControlTrayGuiResidentStatus")
+        self.assertEqual(report["object_type"], "AgentSightTrayResidentStatus")
         self.assertFalse(report["tray_window_present"])
         self.assertFalse(report["host_input_sent"])
 

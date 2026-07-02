@@ -6,11 +6,11 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from ai_control.adapters.mcp import MCPStdioAdapter
-from ai_control.evidence.store import EvidenceReplayService
-from ai_control.host_agent.server import _host_agent_idle_capture_tick, _host_agent_idle_capture_wait_seconds
-from ai_control.segments import BinarySegmentReader, SegmentFrameRecorder, SegmentReader
-from ai_control.tray.state import apply_recording_policy_settings, write_default_tray_config_if_missing
+from agentsight.adapters.mcp import MCPStdioAdapter
+from agentsight.evidence.store import EvidenceReplayService
+from agentsight.host_agent.server import _host_agent_idle_capture_tick, _host_agent_idle_capture_wait_seconds
+from agentsight.segments import SegmentFrameRecorder, decode_mkv_frame_to_image
+from agentsight.tray.state import apply_recording_policy_settings, write_default_tray_config_if_missing
 from tests.acceptance.test_p3a_screen_look_do_protocol import P3AInputChannel, P3ALookPngChannel
 
 
@@ -37,7 +37,7 @@ class PF2IdleCaptureAndRotationTest(unittest.TestCase):
         self.assertTrue(report["captured"])
         self.assertEqual(report["segment_frame"]["status"], "not_recorded")
         self.assertEqual(report["segment_frame"]["not_recorded_reason"], "capture_content_degenerate")
-        self.assertEqual(manifest["frame_count"], 0)
+        self.assertEqual(manifest.get("frame_count", 0), 0)
 
     def test_host_agent_idle_tick_skips_when_readiness_blocked(self) -> None:
         class FakeGateway:
@@ -63,7 +63,7 @@ class PF2IdleCaptureAndRotationTest(unittest.TestCase):
                 apply_recording_policy_settings({"continuous_recording_enabled": True, "idle_fps": 1.0})
                 adapter = FakeAdapter()
                 with mock.patch(
-                    "ai_control.host_agent.server.build_host_agent_health_report",
+                    "agentsight.host_agent.server.build_host_agent_health_report",
                     return_value={
                         "service_status": "session_disconnected",
                         "can_attempt_real_control": False,
@@ -108,18 +108,18 @@ class PF2IdleCaptureAndRotationTest(unittest.TestCase):
 
             self.assertTrue(first["captured"])
             self.assertEqual(first["segment_frame"]["source"], "idle")
-            self.assertEqual(first["segment_frame"]["storage_format"], "binary_agseg")
-            self.assertTrue(Path(status["segment_path_abs"]).exists())
-            self.assertEqual(Path(status["segment_path_abs"]).suffix, ".agseg")
+            self.assertEqual(first["segment_frame"]["storage_format"], "mkv_vfr")
             self.assertFalse(skipped["captured"])
             self.assertEqual(skipped["skip_reason"], "idle_interval_not_elapsed")
             self.assertTrue(second["captured"])
             self.assertEqual(len(observation.captures), 2)
             self.assertEqual(manifest["frame_count"], 2)
-            restored, report = BinarySegmentReader(status["segment_path_abs"]).restore_frame(second["segment_frame"]["frame_id"])
             adapter.session.gateway.segment_recorder.close()
+            self.assertTrue(Path(status["segment_path_abs"]).exists())
+            self.assertEqual(Path(status["segment_path_abs"]).suffix, ".mkv")
+            restored, report = decode_mkv_frame_to_image(second["segment_frame"]["restore_ref"])
             self.assertEqual(restored.size, (160, 100))
-            self.assertTrue(report["hash_ok"], report)
+            self.assertEqual(report["status"], "decoded")
             self.assertFalse(first["boundary"]["business_success_judged"])
             self.assertTrue(adapter.session.gateway.observations)
             self.assertFalse(
@@ -144,30 +144,30 @@ class PF2IdleCaptureAndRotationTest(unittest.TestCase):
             second_frame = _fake_media_frame(evidence, "second.png", captured_at=_epoch("2026-06-22T00:00:01+08:00"))
             first = recorder.record_frame(first_frame, source="idle", event_id="idle-before")
             second = recorder.record_frame(second_frame, source="idle", event_id="idle-after")
+            recorder.close()
 
             self.assertNotEqual(first["segment_id"], second["segment_id"])
             self.assertIn("20260621", first["segment_id"])
             self.assertIn("20260622", second["segment_id"])
             self.assertEqual(first["source"], "idle")
             self.assertEqual(second["source"], "idle")
-            self.assertEqual(first["storage_format"], "binary_agseg")
+            self.assertEqual(first["storage_format"], "mkv_vfr")
             self.assertTrue(Path(first["segment_path_abs"]).exists())
             self.assertTrue(Path(second["segment_path_abs"]).exists())
-            recorder.close()
 
-    def test_segment_recorder_can_keep_legacy_directory_storage_for_migration(self) -> None:
+    def test_segment_recorder_normalizes_legacy_directory_storage_to_mkv_for_migration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             evidence = EvidenceReplayService(temp_dir, session_id="session-legacy")
             recorder = SegmentFrameRecorder(evidence, storage_format="proto_directory")
             frame = _fake_media_frame(evidence, "legacy.png", captured_at=_epoch("2026-06-21T10:00:00+08:00"))
             recorded = recorder.record_frame(frame, source="idle", event_id="idle-legacy")
-
-            self.assertEqual(recorded["storage_format"], "proto_directory")
-            self.assertTrue(Path(recorded["manifest_path_abs"]).exists())
-            restored, report = SegmentReader(Path(recorded["segment_path_abs"])).restore_frame(recorded["frame_id"])
-            self.assertEqual(restored.size, (8, 8))
-            self.assertTrue(report["hash_ok"], report)
             recorder.close()
+
+            self.assertEqual(recorded["storage_format"], "mkv_vfr")
+            self.assertTrue(Path(recorded["manifest_path_abs"]).exists())
+            restored, report = decode_mkv_frame_to_image(recorded["restore_ref"])
+            self.assertEqual(restored.size, (8, 8))
+            self.assertEqual(report["status"], "decoded")
 
     def test_host_agent_idle_tick_reads_tray_policy_without_host_input(self) -> None:
         class FakeGateway:
@@ -207,7 +207,7 @@ class PF2IdleCaptureAndRotationTest(unittest.TestCase):
                 apply_recording_policy_settings({"continuous_recording_enabled": True, "idle_fps": 0.5})
                 adapter = FakeAdapter()
                 with mock.patch(
-                    "ai_control.host_agent.server.build_host_agent_health_report",
+                    "agentsight.host_agent.server.build_host_agent_health_report",
                     return_value={
                         "service_status": "ok_active_default_desktop",
                         "can_attempt_real_control": True,
@@ -250,7 +250,7 @@ class PF2IdleCaptureAndRotationTest(unittest.TestCase):
                 status = adapter.session.gateway.segment_recorder.status()
                 adapter.session.gateway.segment_recorder.close()
 
-        self.assertEqual(status["storage_format"], "binary_agseg")
+        self.assertEqual(status["storage_format"], "mkv_vfr")
         self.assertEqual(status["segment_bucket_granularity"], "hourly")
 
 

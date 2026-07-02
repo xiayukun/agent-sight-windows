@@ -22,18 +22,18 @@ A pixel-grounded observe-and-act host for Windows AI agents.
 
 To avoid breaking current entrypoints, these names remain for now:
 
-- Python package: `ai_control`
-- console scripts: `ai-control-*`
-- local data directory: `%LOCALAPPDATA%\ai-control`
-- current workspace: `C:\git\其他\ai-control`
-- historical exe names: `AIControl*.exe`
+- Python package: `agentsight`
+- console scripts: `agentsight-*`
+- local data directory: `%LOCALAPPDATA%\AgentSight`
+- current workspace: `C:\git\其他\AgentSight`
+- historical exe names: `AgentSight*.exe`
 
 ## Do Not Rename The Active Workspace Directly
 
 Do not directly rename the active Codex workspace from:
 
 ```text
-C:\git\其他\ai-control
+C:\git\其他\AgentSight
 ```
 
 to:

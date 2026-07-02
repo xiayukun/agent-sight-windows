@@ -3,8 +3,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ai-control"
-version = "0.1.0"
+name = "agentsight"
+version = "1.0.0"
 description = "A pixel-grounded observe-and-act host for Windows AI agents."
 requires-python = ">=3.11"
 dependencies = []
@@ -14,37 +14,37 @@ capture-mss = ["mss"]
 capture-pillow = ["Pillow"]
 capture-windows-capture = ["windows-capture"]
 windows-capture = ["mss", "Pillow", "windows-capture"]
-packaging-exe = ["pyinstaller"]
+packaging-exe = ["pyinstaller", "PySide6"]
 
 [project.scripts]
-ai-control-cli = "ai_control.adapters.local_cli:main"
-ai-control-mcp = "ai_control.adapters.mcp.server:main"
-ai-control-capture-diagnostics = "ai_control.diagnostics.capture_cli:main"
-ai-control-capture-probe = "ai_control.diagnostics.capture_cli:main"
-ai-control-capture-smoke = "ai_control.diagnostics.capture_smoke_cli:main"
-ai-control-first-use-doctor = "ai_control.diagnostics.first_use_doctor_cli:main"
-ai-control-input-smoke = "ai_control.diagnostics.input_smoke_cli:main"
-ai-control-p0-real-input-smoke = "ai_control.diagnostics.p0_real_input_closed_loop_cli:main"
-ai-control-attention-sync-proof = "ai_control.diagnostics.attention_sync_value:main"
-ai-control-release-readiness = "ai_control.diagnostics.release_readiness:main"
-ai-control-installer = "ai_control.installer:main"
-ai-control-host-agent = "ai_control.host_agent.server:main"
-ai-control-host-agent-scenarios = "ai_control.host_agent.scenarios:main"
-ai-control-host-agent-installer = "ai_control.host_agent.installer:main"
-ai-control-session-supervisor = "ai_control.session_supervisor:main"
-ai-control-tray = "ai_control.tray.cli:main"
-ai-control-tray-gui = "ai_control.tray.gui:main"
-ai-control-segment-decoder = "ai_control.segments.decoder_cli:main"
+agentsight-cli = "agentsight.adapters.local_cli:main"
+agentsight-mcp = "agentsight.adapters.mcp.server:main"
+agentsight-capture-diagnostics = "agentsight.diagnostics.capture_cli:main"
+agentsight-capture-probe = "agentsight.diagnostics.capture_cli:main"
+agentsight-capture-smoke = "agentsight.diagnostics.capture_smoke_cli:main"
+agentsight-first-use-doctor = "agentsight.diagnostics.first_use_doctor_cli:main"
+agentsight-input-smoke = "agentsight.diagnostics.input_smoke_cli:main"
+agentsight-p0-real-input-smoke = "agentsight.diagnostics.p0_real_input_closed_loop_cli:main"
+agentsight-attention-sync-proof = "agentsight.diagnostics.attention_sync_value:main"
+agentsight-release-readiness = "agentsight.diagnostics.release_readiness:main"
+agentsight-installer = "agentsight.installer:main"
+agentsight-host-agent = "agentsight.host_agent.server:main"
+agentsight-host-agent-scenarios = "agentsight.host_agent.scenarios:main"
+agentsight-host-agent-installer = "agentsight.host_agent.installer:main"
+agentsight-session-supervisor = "agentsight.session_supervisor:main"
+agentsight-tray = "agentsight.tray.cli:main"
+agentsight-tray-gui = "agentsight.tray.gui:main"
+agentsight-segment-decoder = "agentsight.segments.decoder_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["ai_control*"]
+include = ["agentsight*"]
 
 [tool.setuptools.package-data]
-"ai_control.adapters.skill" = ["SKILL.md"]
+"agentsight.adapters.skill" = ["SKILL.md"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

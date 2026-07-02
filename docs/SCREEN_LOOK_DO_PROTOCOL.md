@@ -2,7 +2,7 @@
 
 更新时间：2026-06-20
 
-定位：本文件是开发者协议说明，不是普通 AI 的默认操作手册。普通 AI 使用 AgentSight 时，应优先读取 `src/ai_control/adapters/skill/SKILL.md`，并遵循 `read discovery -> /screen -> /look -> /do -> /look` 的短链路。
+定位：本文件是开发者协议说明，不是普通 AI 的默认操作手册。普通 AI 使用 AgentSight 时，应优先读取 `src/agentsight/adapters/skill/SKILL.md`，并遵循 `read discovery -> /screen -> /look -> /do -> /look` 的短链路。
 
 ## Goal
 
@@ -27,27 +27,27 @@ Current allowed modes:
 
 ```text
 source mode:
-  py -m ai_control.session_supervisor run
+  py -m agentsight.session_supervisor run
 
 packaged mode:
-  AIControlSessionSupervisor.exe run
+  AgentSightSupervisor.exe run
 
 install mode:
-  AIControlInstaller.exe
-    -> registers AIControlSessionSupervisor for the current user
-    -> starts AIControlSessionSupervisor.exe
-    -> supervisor starts/monitors AIControlHostAgent.exe
-    -> supervisor starts/monitors AIControlTrayGui.exe
+  AgentSightSetup.exe
+    -> registers AgentSightSupervisor for the current user
+    -> starts AgentSightSupervisor.exe
+    -> supervisor starts/monitors AgentSightHostAgent.exe
+    -> supervisor starts/monitors AgentSightTray.exe
     -> Host Agent exposes discovery_v2 and /screen /look /do
 ```
 
-The only long-term self-start entry is `AIControlSessionSupervisor`. New public
+The only long-term self-start entry is `AgentSightSupervisor`. New public
 protocol work must not add new recommended self-start entries for the Host
 Agent watchdog or Tray GUI watchdog. Those split watchdogs are legacy
 compatibility paths.
 
 State, discovery, reports, stop markers, visual-store outputs, and evidence
-remain under `%LOCALAPPDATA%\ai-control` or another explicit user data root.
+remain under `%LOCALAPPDATA%\AgentSight` or another explicit user data root.
 Final users must not need to know the source checkout path, set
 `PYTHONPATH=src`, or run `py -m ...`. Source mode may keep those conveniences
 for development, but packaged/frozen mode must use adjacent executables in the
@@ -195,7 +195,7 @@ to be deleted in the same slice.
 Host Agent discovery stays at:
 
 ```text
-%LOCALAPPDATA%\ai-control\host-agent.json
+%LOCALAPPDATA%\AgentSight\host-agent.json
 ```
 
 Current public shape:
@@ -212,9 +212,9 @@ Current public shape:
     "do": "/do"
   },
   "files": {
-    "service_state": "%LOCALAPPDATA%/ai-control/service-state.json",
-    "session_supervisor_state": "%LOCALAPPDATA%/ai-control/session-supervisor-state.json",
-    "tray_config": "%LOCALAPPDATA%/ai-control/tray-config.jsonc"
+    "service_state": "%LOCALAPPDATA%/AgentSight/service-state.json",
+    "session_supervisor_state": "%LOCALAPPDATA%/AgentSight/session-supervisor-state.json",
+    "tray_config": "%LOCALAPPDATA%/AgentSight/tray-config.jsonc"
   }
 }
 ```
@@ -241,7 +241,7 @@ surface:
 {
   "code": "READY",
   "readiness": {
-    "schema": "ai_control_public_readiness_v1",
+    "schema": "agentsight_public_readiness_v1",
     "ok": true,
     "code": "READY",
     "service_status": "ok_active_default_desktop",
@@ -452,7 +452,12 @@ Rules:
 - `basis` must be a view in the ordinary public flow.
 - `move` is the only mouse action that accepts `x`/`y`.
 - `click`, `dblclick`, mouse `down`, mouse `up`, and `wheel` use the current
-  mouse position; move first.
+  mouse position; move first. `wheel` is a native OS wheel event, not DOM
+  `WheelEvent.deltaY`: on Windows positive `dy`/`wheel_delta` means wheel-up and
+  negative means wheel-down. The host does not choose or verify an inner
+  scrollable widget; if a page/list may have nested scroll containers, re-`look`
+  after the wheel and repeat/reposition/focus rather than assuming semantic
+  scroll success.
 - If `basis.point` is present, the host maps that view-local point through the
   stored view transform and uses it as the current mouse point. If the view or
   transform is missing, the request must fail rather than guessing coordinates.
@@ -582,7 +587,7 @@ Current implementation includes:
   regenerable preview refs;
 - timeline/log derived review viewers for human review;
 - tray capture and retention settings for idle FPS, action pre/post capture,
-  post-action FPS/duration/max frames, retention days, daily boundary, and
+  post-action FPS/duration, retention days, daily boundary, and
   Segment bucket granularity.
 
 Later slices should implement:

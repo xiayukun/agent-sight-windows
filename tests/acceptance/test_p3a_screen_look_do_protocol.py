@@ -10,23 +10,24 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from ai_control.adapters.mcp import MCPStdioAdapter, MCP_TOOL_NAMES
-from ai_control.adapters.mcp.server import tool_schema
-from ai_control.channels.windows_software.input import WindowsSoftwareInputChannel
-from ai_control.evidence.store import EvidenceReplayService
-from ai_control.host_agent.server import (
+from agentsight.adapters.mcp import MCPStdioAdapter, MCP_TOOL_NAMES
+from agentsight.adapters.mcp.server import tool_schema
+from agentsight.channels.windows_software.input import WindowsSoftwareInputChannel
+from agentsight.evidence.store import EvidenceReplayService
+from agentsight.host_agent.server import (
     _host_agent_apply_recording_policy_defaults,
     _host_agent_protocol_do,
     _host_agent_protocol_look,
+    _host_agent_protocol_look_requires_visual_lock,
     _host_agent_visual_observe,
     _host_historical_decode_region,
     _host_agent_public_blocked_response,
     _host_agent_public_readiness,
     write_discovery_file,
 )
-from ai_control.protocol.schemas import SchemaError, validate_request
-from ai_control.segments import BinarySegmentWriter
-from ai_control.tray.state import apply_recording_policy_settings, write_default_tray_config_if_missing
+from agentsight.protocol.schemas import SchemaError, validate_request
+from agentsight.segments import BinarySegmentWriter
+from agentsight.tray.state import apply_recording_policy_settings, default_tray_config_file, write_default_tray_config_if_missing
 
 
 PIL_AVAILABLE = importlib.util.find_spec("PIL") is not None
@@ -199,7 +200,7 @@ class WindowsSoftwareInputChannelPlatformProbeTest(unittest.TestCase):
     def test_describe_avoids_wmi_backed_platform_system_probe(self) -> None:
         channel = WindowsSoftwareInputChannel(enabled=True)
         with mock.patch("platform.system", side_effect=AssertionError("platform.system must not be called")):
-            with mock.patch("ai_control.channels.windows_software.input._is_windows", return_value=True):
+            with mock.patch("agentsight.channels.windows_software.input._is_windows", return_value=True):
                 description = channel.describe()
 
         self.assertEqual(description["status"], "available")
@@ -296,7 +297,7 @@ def _png_bytes(width: int, height: int, index: int) -> bytes:
 class P3AScreenLookDoProtocolTest(unittest.TestCase):
     def assert_public_ready(self, data: dict[str, Any]) -> None:
         self.assertEqual(data["code"], "READY")
-        self.assertEqual(data["readiness"]["schema"], "ai_control_public_readiness_v1")
+        self.assertEqual(data["readiness"]["schema"], "agentsight_public_readiness_v1")
         self.assertTrue(data["readiness"]["ok"])
         self.assertEqual(data["readiness"]["code"], "READY")
         self.assertEqual(data["control_blockers"], [])
@@ -437,7 +438,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
             observe_dir = Path(temp_dir) / "observe"
             observe_dir.mkdir()
             fake_adapter = P3AHostSegmentFakeAdapter(observe_dir=observe_dir)
-            with mock.patch("ai_control.host_agent.server.build_manual_windows_input_adapter", return_value=fake_adapter):
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter", return_value=fake_adapter):
                 status, observe = _host_agent_visual_observe(
                     visual_sessions={},
                     runs_dir=temp_dir,
@@ -481,7 +482,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
             observe_dir = Path(temp_dir) / "observe"
             observe_dir.mkdir()
             fake_adapter = P3AHostSegmentFakeAdapter(observe_dir=observe_dir)
-            with mock.patch("ai_control.host_agent.server.build_manual_windows_input_adapter", return_value=fake_adapter):
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter", return_value=fake_adapter):
                 status, look = _host_agent_protocol_look(
                     visual_sessions={},
                     protocol_views={},
@@ -511,7 +512,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
             visual_sessions: dict[str, dict[str, Any]] = {}
             protocol_views: dict[str, dict[str, Any]] = {}
             fake_adapter = P3AHostSegmentFakeAdapter(observe_dir=observe_dir)
-            with mock.patch("ai_control.host_agent.server.build_manual_windows_input_adapter", return_value=fake_adapter) as build:
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter", return_value=fake_adapter) as build:
                 first_status, first = _host_agent_protocol_look(
                     visual_sessions=visual_sessions,
                     protocol_views=protocol_views,
@@ -566,7 +567,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
             writer.close()
 
             protocol_views: dict[str, dict[str, Any]] = {}
-            with mock.patch("ai_control.host_agent.server.build_manual_windows_input_adapter") as build:
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter") as build:
                 status, look = _host_agent_protocol_look(
                     visual_sessions={},
                     protocol_views=protocol_views,
@@ -707,7 +708,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
             )
             writer.close()
 
-            with mock.patch("ai_control.host_agent.server.build_manual_windows_input_adapter") as build:
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter") as build:
                 status, look = _host_agent_protocol_look(
                     visual_sessions={},
                     protocol_views={},
@@ -785,7 +786,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
                 }
             }
 
-            with mock.patch("ai_control.host_agent.server.build_manual_windows_input_adapter") as build:
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter") as build:
                 status, look = _host_agent_protocol_look(
                     visual_sessions={},
                     protocol_views=protocol_views,
@@ -833,7 +834,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
                     },
                 }
             }
-            with mock.patch("ai_control.host_agent.server.build_manual_windows_input_adapter", return_value=fake_adapter):
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter", return_value=fake_adapter):
                 status, look = _host_agent_protocol_look(
                     visual_sessions={},
                     protocol_views=protocol_views,
@@ -1008,7 +1009,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
             )
             writer.close()
 
-            with mock.patch("ai_control.host_agent.server.build_manual_windows_input_adapter") as build:
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter") as build:
                 status, look = _host_agent_protocol_look(
                     visual_sessions={},
                     protocol_views={},
@@ -1092,7 +1093,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
                 }
             }
 
-            with mock.patch("ai_control.host_agent.server.build_manual_windows_input_adapter") as build:
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter") as build:
                 status, look = _host_agent_protocol_look(
                     visual_sessions={},
                     protocol_views=protocol_views,
@@ -1126,10 +1127,28 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
         self.assertFalse(look["tool_asserts_business_success"])
         build.assert_not_called()
 
+    def test_host_look_segment_review_queries_do_not_require_visual_lock(self) -> None:
+        self.assertFalse(_host_agent_protocol_look_requires_visual_lock({"q": "changes"}))
+        self.assertFalse(_host_agent_protocol_look_requires_visual_lock({"q": "clip"}))
+        self.assertFalse(_host_agent_protocol_look_requires_visual_lock({"q": "diff", "mode": "timeline"}))
+        self.assertFalse(_host_agent_protocol_look_requires_visual_lock({"q": "diff", "mode": "timeline_with_artifacts"}))
+        self.assertFalse(_host_agent_protocol_look_requires_visual_lock({"q": "frame", "time": {"near": "2026-06-21T10:00:00Z"}}))
+        self.assertFalse(_host_agent_protocol_look_requires_visual_lock({"q": "frame", "time": {"at": "2026-06-21T10:00:00Z"}}))
+        self.assertFalse(
+            _host_agent_protocol_look_requires_visual_lock(
+                {"q": "frame", "time": {"requested_time": "2026-06-21T10:00:00Z"}}
+            )
+        )
+
+        self.assertTrue(_host_agent_protocol_look_requires_visual_lock({}))
+        self.assertTrue(_host_agent_protocol_look_requires_visual_lock({"q": "frame"}))
+        self.assertTrue(_host_agent_protocol_look_requires_visual_lock({"q": "diff", "mode": "endpoints"}))
+
     def test_mcp_look_changes_returns_existing_segment_metadata_without_observe(self) -> None:
         from PIL import Image
 
         channel = P3AMemoryLookChannel()
+
         with tempfile.TemporaryDirectory() as temp_dir:
             adapter = MCPStdioAdapter(
                 runs_dir=temp_dir,
@@ -1629,8 +1648,8 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
             }
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            with mock.patch("ai_control.host_agent.server.query_segment_decoder_near_time", return_value=near):
-                with mock.patch("ai_control.host_agent.server.decode_segment_region_to_image_content", side_effect=decode_side_effect) as decode:
+            with mock.patch("agentsight.host_agent.server.query_segment_decoder_near_time", return_value=near):
+                with mock.patch("agentsight.host_agent.server.decode_segment_region_to_image_content", side_effect=decode_side_effect) as decode:
                     status, look = _host_agent_protocol_look(
                         visual_sessions={},
                         protocol_views={},
@@ -1717,8 +1736,8 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
             }
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            with mock.patch("ai_control.host_agent.server.query_segment_decoder_near_time", return_value=near):
-                with mock.patch("ai_control.host_agent.server.decode_segment_region_to_image_content", side_effect=decode_side_effect) as decode:
+            with mock.patch("agentsight.host_agent.server.query_segment_decoder_near_time", return_value=near):
+                with mock.patch("agentsight.host_agent.server.decode_segment_region_to_image_content", side_effect=decode_side_effect) as decode:
                     status, look = _host_agent_protocol_look(
                         visual_sessions={},
                         protocol_views={},
@@ -2002,7 +2021,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
                 },
             )
             session_dirs = list(Path(temp_dir).glob("session-*"))
-            segment_frames = list(Path(temp_dir).glob("segments/*.agseg"))
+            segment_frames = list(Path(temp_dir).glob("segments/*.mkv"))
 
         self.assertTrue(result["content"][0]["data"])
         self.assertIsNone(result["evidence_ref"])
@@ -2045,7 +2064,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
             session_dirs = list(Path(temp_dir).glob("session-*"))
             media_files = list(Path(temp_dir).glob("session-*/media/*"))
             object_files = list(Path(temp_dir).glob("session-*/objects/*"))
-            segment_files = list(Path(temp_dir).glob("segments/*.agseg"))
+            segment_files = list(Path(temp_dir).glob("segments/*.mkv"))
             backend_events = list(input_channel.events)
 
         self.assertTrue(result["ok"])
@@ -2419,7 +2438,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
         self.assertTrue(action["ok"])
         self.assertTrue(action["data"]["ok"])
         post = action["data"]["post_observe"]
-        self.assertEqual(post["schema"], "ai_control_post_action_observation_window_v1")
+        self.assertEqual(post["schema"], "agentsight_post_action_observation_window_v1")
         self.assertEqual(post["request"]["frame_count"], 3)
         self.assertEqual(post["sampled_frame_count"], 3)
         self.assertEqual(post["comparison_count"], 3)
@@ -2518,7 +2537,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
         self.assertTrue(data["no_capture_performed"])
         self.assertFalse(data["tool_asserts_business_success"])
         near = data["frames_near_time"]
-        self.assertEqual(near["schema"], "ai_control_p0_time_near_frame_query_v1")
+        self.assertEqual(near["schema"], "agentsight_p0_time_near_frame_query_v1")
         self.assertEqual(near["query_status"], "generated")
         self.assertGreaterEqual(near["frame_count"], 1)
         self.assertIsNotNone(near["nearest_frame"])
@@ -2626,6 +2645,15 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
             },
         }
         self.assertTrue(validate_request(valid_stop).payload["post_observe"]["stop_when_stable"])
+        valid_full_minute_60fps = {
+            "command": "do",
+            "payload": {
+                "basis": {"view_id": "v_test"},
+                "seq": [{"t": "wait", "ms": 1}],
+                "post_observe": {"frame_count": 3600},
+            },
+        }
+        self.assertEqual(validate_request(valid_full_minute_60fps).payload["post_observe"]["frame_count"], 3600)
         with self.assertRaises(SchemaError):
             validate_request(
                 {
@@ -2633,7 +2661,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
                     "payload": {
                         "basis": {"view_id": "v_test"},
                         "seq": [{"t": "wait", "ms": 1}],
-                        "post_observe": {"frame_count": 1001},
+                        "post_observe": {"frame_count": 3601},
                     },
                 }
             )
@@ -2666,7 +2694,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
         post_schema = do_schema["properties"]["post_observe"]
         self.assertNotIn("post_observe", do_schema["required"])
         self.assertFalse(post_schema["additionalProperties"])
-        self.assertEqual(post_schema["properties"]["frame_count"]["maximum"], 1000)
+        self.assertEqual(post_schema["properties"]["frame_count"]["maximum"], 3600)
         self.assertEqual(post_schema["properties"]["interval_ms"]["maximum"], 2000)
         self.assertEqual(post_schema["properties"]["stop_when_stable"]["type"], "boolean")
 
@@ -2687,6 +2715,9 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
         self.assertEqual(discovery["look_url"], "http://127.0.0.1:8765/look")
         self.assertEqual(discovery["do_url"], "http://127.0.0.1:8765/do")
         self.assertEqual(discovery["mouse_url"], "http://127.0.0.1:8765/mouse")
+        self.assertEqual(discovery["process_identity"]["role"], "host_agent")
+        self.assertIn(discovery["process_identity"]["install_layout"], {"source_tree", "frozen_exe"})
+        self.assertFalse(discovery["process_identity"]["boundary"]["business_success_judged"])
 
     def test_host_agent_public_readiness_maps_locked_desktop_to_embedded_code(self) -> None:
         health = {
@@ -2706,7 +2737,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
 
         self.assertFalse(readiness["ok"])
         self.assertEqual(readiness["code"], "DESKTOP_LOCKED")
-        self.assertEqual(blocked["schema"], "ai_control_public_readiness_blocked_v1")
+        self.assertEqual(blocked["schema"], "agentsight_public_readiness_blocked_v1")
         self.assertEqual(blocked["code"], "DESKTOP_LOCKED")
         self.assertEqual(blocked["readiness"]["code"], "DESKTOP_LOCKED")
         self.assertEqual(blocked["operation"], "look")
@@ -3122,7 +3153,7 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
         self.assertFalse(post["boundary"]["window_semantics_used"])
         self.assertNotIn("media_path_abs", json.dumps(post, sort_keys=True))
 
-    def test_host_agent_http_recording_policy_defaults_can_inject_bounded_post_observe(self) -> None:
+    def test_host_agent_http_recording_policy_defaults_can_inject_duration_based_post_observe(self) -> None:
         request = {
             "v": "V1",
             "id": "host-do-default-post",
@@ -3134,17 +3165,47 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
             roaming = Path(temp_dir) / "Roaming"
             with mock.patch.dict("os.environ", {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}, clear=False):
                 write_default_tray_config_if_missing()
+                config_path = default_tray_config_file()
+                payload = json.loads(config_path.read_text(encoding="utf-8"))
+                payload["recording"]["action_capture"]["post_action_fps"] = 60
+                payload["recording"]["action_capture"]["post_action_duration_ms"] = 60000
+                config_path.write_text(json.dumps(payload), encoding="utf-8")
                 enabled = _host_agent_apply_recording_policy_defaults(request)
                 apply_recording_policy_settings({"action_capture_enabled": False})
                 disabled = _host_agent_apply_recording_policy_defaults(request)
 
         self.assertIsNot(enabled, request)
         self.assertIn("post_observe", enabled)
-        self.assertEqual(enabled["post_observe"]["frame_count"], 100)
-        self.assertEqual(enabled["post_observe"]["interval_ms"], 100)
+        self.assertEqual(enabled["post_observe"]["frame_count"], 3600)
+        self.assertEqual(enabled["post_observe"]["interval_ms"], 17)
         self.assertFalse(enabled["post_observe"]["stop_when_stable"])
         self.assertNotIn("post_observe", disabled)
         self.assertNotIn("recording_policy_applied", enabled)
+        self.assertEqual(validate_request({"command": "do", "payload": enabled}).payload["post_observe"]["frame_count"], 3600)
+
+    def test_host_agent_recording_policy_defaults_ignore_legacy_max_post_action_frames(self) -> None:
+        request = {
+            "v": "V1",
+            "id": "host-do-legacy-max-frames",
+            "basis": {"view_id": "v_host"},
+            "seq": [{"t": "move", "x": 1, "y": 1, "coord": "view", "move": "instant"}],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local = Path(temp_dir) / "LocalAppData"
+            roaming = Path(temp_dir) / "Roaming"
+            with mock.patch.dict("os.environ", {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}, clear=False):
+                config = write_default_tray_config_if_missing()
+                config_path = Path(str(config["config_file"]))
+                payload = json.loads(config_path.read_text(encoding="utf-8"))
+                payload["recording"]["action_capture"]["post_action_fps"] = 10
+                payload["recording"]["action_capture"]["post_action_duration_ms"] = 10000
+                payload["recording"]["action_capture"]["max_post_action_frames"] = 2
+                config_path.write_text(json.dumps(payload), encoding="utf-8")
+                enabled = _host_agent_apply_recording_policy_defaults(request)
+
+        post = enabled["post_observe"]
+        self.assertEqual(post["frame_count"], 100)
+        self.assertEqual(post["interval_ms"], 100)
         self.assertEqual(validate_request({"command": "do", "payload": enabled}).payload["post_observe"]["frame_count"], 100)
 
     def test_host_agent_recording_policy_defaults_tolerate_bad_human_config_types(self) -> None:
@@ -3163,14 +3224,13 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
                 payload = json.loads(config_path.read_text(encoding="utf-8"))
                 payload["recording"]["action_capture"]["post_action_fps"] = "bad"
                 payload["recording"]["action_capture"]["post_action_duration_ms"] = {}
-                payload["recording"]["action_capture"]["max_post_action_frames"] = []
                 config_path.write_text(json.dumps(payload), encoding="utf-8")
                 enabled = _host_agent_apply_recording_policy_defaults(request)
 
         post = enabled["post_observe"]
         self.assertEqual(post["delay_ms"], 0)
-        self.assertEqual(post["frame_count"], 100)
-        self.assertEqual(post["interval_ms"], 100)
+        self.assertEqual(post["frame_count"], 10)
+        self.assertEqual(post["interval_ms"], 1000)
         self.assertEqual(post["stable_threshold"], 0.001)
         self.assertEqual(post["stable_frame_count"], 2)
         self.assertFalse(post["stop_when_stable"])

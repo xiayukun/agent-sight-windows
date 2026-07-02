@@ -25,7 +25,7 @@ py tools/build_host_agent_exe.py
 - raw evidence 必须和 cursor overlay、diff heatmap、annotated review artifact 分离。
 - Tray GUI 只是人类可见控制面，不是 AI 语义通道。
 - 不提交 `runs*`、`dist/`、`build/`、本地缓存、截图证据或 token。
-- 不在当前活跃工作区中直接把 `ai-control` 目录改名；公开品牌先用文档表达。
+- 不在当前活跃工作区中直接把 `agentsight` 目录改名；公开品牌先用文档表达。
 
 ## Pull Request 检查
 

@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a reproducible AI-Control problem
+about: Report a reproducible AgentSight problem
 title: "[Bug]: "
 labels: bug
 assignees: ""
@@ -12,7 +12,7 @@ assignees: ""
 
 - Windows version:
 - Python version:
-- AI-Control entrypoint used:
+- AgentSight entrypoint used:
 - Host Agent running:
 - Operator-control state:
 - Emergency stop state:

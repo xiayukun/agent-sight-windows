@@ -2,13 +2,13 @@
 
 中文 | English: not yet mirrored
 
-本文件用于让 Hermes 或其它新 coding agent 快速接手 AgentSight for Windows。它只记录项目基本情况、当前主线、开发规范和最近已知上下文；具体 API 细节仍以 `AGENTS.md`、`README.md`、`src/ai_control/adapters/skill/SKILL.md` 和源码为准。
+本文件用于让 Hermes 或其它新 coding agent 快速接手 AgentSight for Windows。它只记录项目基本情况、当前主线、开发规范和最近已知上下文；具体 API 细节仍以 `AGENTS.md`、`README.md`、`src/agentsight/adapters/skill/SKILL.md` 和源码为准。
 
 ## 1. 项目一句话
 
 AgentSight for Windows 是一个给 AI agent 使用的 Windows 像素级 observe-and-act 宿主：AI 通过真实屏幕像素观察，通过人类等价鼠标键盘输入行动，并保留可复核的事件、帧索引和证据链。
 
-历史兼容名仍然存在：Python 包名是 `ai_control`，部分 exe / 数据目录仍使用 `AIControl` / `ai-control`。不要在当前工作区直接重命名 `C:\git\其他\ai-control`。
+历史兼容名仍然存在：Python 包名是 `agentsight`，部分 exe / 数据目录仍使用 `AgentSight` / `agentsight`。不要在当前工作区直接重命名 `C:\git\其他\AgentSight`。
 
 ## 2. 必须遵守的边界
 
@@ -51,16 +51,16 @@ MCP public tools 只应暴露 `screen`、`look`、`do`。不要把 `/health` 恢
 
 ```text
 HKCU Run key / Startup
-  -> AIControlSessionSupervisor
-       -> AIControlHostAgent
-       -> AIControlTrayGui
+  -> AgentSightSupervisor
+       -> AgentSightHostAgent
+       -> AgentSightTray
 ```
 
 职责：
 
-- `AIControlSessionSupervisor`：当前登录用户会话中的生命周期管理者。
-- `AIControlHostAgent`：提供 `/screen`、`/look`、`/do`、截图、输入、readiness 和记录。
-- `AIControlTrayGui`：人类可见控制面，含状态、暂停/允许、紧急停止、采集与保留设置、打开时间线。
+- `AgentSightSupervisor`：当前登录用户会话中的生命周期管理者。
+- `AgentSightHostAgent`：提供 `/screen`、`/look`、`/do`、截图、输入、readiness 和记录。
+- `AgentSightTray`：人类可见控制面，含状态、暂停/允许、紧急停止、采集与保留设置、打开时间线。
 - `AgentSightTimelineViewer`：原生 PySide6/Qt 时间线窗口。
 
 当前不要做 Windows Service、SYSTEM、driver、UAC secure desktop 控制、`WTSGetActiveConsoleSessionId + CreateProcessAsUser`。
@@ -72,7 +72,7 @@ HKCU Run key / Startup
 默认运行态应主要写：
 
 ```text
-%LOCALAPPDATA%\ai-control\runs_host_agent\segments\
+%LOCALAPPDATA%\AgentSight\runs_host_agent\segments\
   agentsight-YYYYMMDD-HH-001.mkv
   agentsight-YYYYMMDD-HH-001.frames.jsonl
   agentsight-YYYYMMDD-HH-001.manifest.json
@@ -107,10 +107,10 @@ HKCU Run key / Startup
 
 如继续改时间线，优先读：
 
-- `src/ai_control/tray/timeline_viewer.py`
-- `src/ai_control/tray/viewers.py`
-- `src/ai_control/segments/mkv_container.py`
-- `src/ai_control/segments/recorder.py`
+- `src/agentsight/tray/timeline_viewer.py`
+- `src/agentsight/tray/viewers.py`
+- `src/agentsight/segments/mkv_container.py`
+- `src/agentsight/segments/recorder.py`
 
 ## 7. 开发与验证
 
@@ -118,7 +118,7 @@ HKCU Run key / Startup
 
 ```powershell
 $env:PYTHONPATH = "src"
-py -B -m compileall -q src\ai_control
+py -B -m compileall -q src\AgentSight
 py -B -m unittest tests.acceptance.test_mkv_segment_storage
 py -B -m unittest tests.acceptance.test_p3a_screen_look_do_protocol
 py -B -m unittest tests.acceptance.test_p1g_tray_gui_control_surface
@@ -133,8 +133,8 @@ py -m PyInstaller --noconfirm packaging\pyinstaller\AgentSightTimelineViewer.spe
 重打包 Host/Tray/Timeline：
 
 ```powershell
-py -m PyInstaller --noconfirm packaging\pyinstaller\AIControlHostAgent.spec
-py -m PyInstaller --noconfirm packaging\pyinstaller\AIControlTrayGui.spec
+py -m PyInstaller --noconfirm packaging\pyinstaller\AgentSightHostAgent.spec
+py -m PyInstaller --noconfirm packaging\pyinstaller\AgentSightTray.spec
 py -m PyInstaller --noconfirm packaging\pyinstaller\AgentSightTimelineViewer.spec
 ```
 
@@ -145,7 +145,7 @@ py -m PyInstaller --noconfirm packaging\pyinstaller\AgentSightTimelineViewer.spe
 运行数据在：
 
 ```text
-%LOCALAPPDATA%\ai-control
+%LOCALAPPDATA%\AgentSight
 ```
 
 可保留的小状态文件通常包括：
@@ -183,7 +183,7 @@ py -m PyInstaller --noconfirm packaging\pyinstaller\AgentSightTimelineViewer.spe
 1. 读 `AGENTS.md`。
 2. 读本文件。
 3. 读 `README.md`。
-4. 读 `src/ai_control/adapters/skill/SKILL.md` 中 public `/screen` / `/look` / `/do` 和 Tray/Timeline 相关部分。
+4. 读 `src/agentsight/adapters/skill/SKILL.md` 中 public `/screen` / `/look` / `/do` 和 Tray/Timeline 相关部分。
 5. 针对具体任务再读相关源码，不要一开始全仓库漫游。
 
 遇到文档冲突时：

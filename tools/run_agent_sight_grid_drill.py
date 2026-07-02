@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 
 
-CALLER = os.environ.get("AI_CONTROL_CALLER", "agent-sight-grid-drill-20260621")
+CALLER = os.environ.get("AGENTSIGHT_CALLER", "agent-sight-grid-drill-20260621")
 BLUE_TARGET = (37, 99, 235)
 GREEN_DONE = (22, 163, 74)
 
 
 def main() -> int:
-    agent_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "ai-control"
+    agent_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "AgentSight"
     discovery = json.loads((agent_dir / "host-agent.json").read_text(encoding="utf-8"))
     client = HostClient(discovery)
     page = (Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "agent_sight_grid_drill.html").resolve()
@@ -101,7 +101,7 @@ class HostClient:
         self.headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {discovery['token']}",
-            "X-AI-Control-Caller": CALLER,
+            "X-AgentSight-Caller": CALLER,
         }
 
     def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:

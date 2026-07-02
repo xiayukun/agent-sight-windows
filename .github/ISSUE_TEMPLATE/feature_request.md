@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Propose a boundary-preserving AI-Control capability
+about: Propose a boundary-preserving AgentSight capability
 title: "[Feature]: "
 labels: enhancement
 assignees: ""

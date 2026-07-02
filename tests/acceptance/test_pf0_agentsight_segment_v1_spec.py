@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from ai_control.segments import (
+from agentsight.segments import (
     SEGMENT_INDEX_SCHEMA,
     SEGMENT_SCHEMA,
     build_empty_segment_index,

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentSight Human Command Pool 20</title>
+  <style>
+    :root { --blue:#2563eb; --green:#22c55e; --red:#ef4444; --purple:#7c3aed; --orange:#f97316; --ink:#111827; --muted:#64748b; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI", Arial, sans-serif; background:#f8fafc; color:var(--ink); }
+    #anchor { position:fixed; left:0; top:0; width:24px; height:24px; background:#ff00ff; z-index:1000; border:3px solid #00ffff; }
+    header { margin:32px 40px 8px; padding:8px 12px; background:#0f172a; color:white; border-radius:8px; display:flex; justify-content:space-between; align-items:center; height:42px; }
+    h1 { font-size:18px; margin:0; }
+    #summary { font-weight:700; }
+    #grid { margin-left:40px; display:grid; grid-template-columns:repeat(5, 245px); grid-auto-rows:145px; gap:10px; }
+    .card { position:relative; background:#fff; border:2px solid #cbd5e1; border-radius:10px; padding:8px; overflow:hidden; }
+    .card.pass { border-color:#16a34a; background:#bbf7d0; }
+    .card.warn { border-color:#f59e0b; background:#fef3c7; }
+    .card h2 { margin:0 0 4px; font-size:12px; color:#334155; }
+    button, input { font:inherit; font-size:12px; border:1px solid #94a3b8; border-radius:6px; min-height:24px; }
+    button { background:#fff; padding:3px 7px; cursor:pointer; }
+    button.primary { background:var(--blue); border-color:var(--blue); color:white; }
+    button.red { background:var(--red); border-color:var(--red); color:white; }
+    button.purple { background:var(--purple); border-color:var(--purple); color:white; }
+    button.orange { background:var(--orange); border-color:var(--orange); color:white; }
+    input { padding:3px 6px; width:132px; background:#fff; }
+    .status { position:absolute; left:8px; right:8px; bottom:6px; min-height:19px; padding:2px 5px; font-size:11px; border-radius:5px; background:#e2e8f0; color:#1f2937; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .dots { display:grid; grid-template-columns:repeat(4, 28px); gap:6px; margin-top:4px; }
+    .dot { width:25px; height:25px; border-radius:50%; border:2px solid #0f172a; }
+    .dot.blue { background:var(--blue); } .dot.green { background:var(--green); } .dot.red { background:var(--red); } .dot.purple { background:var(--purple); } .dot.orange { background:var(--orange); }
+    .checks { display:grid; grid-template-columns:repeat(5, 28px); gap:5px; margin-top:4px; }
+    .checks .switch { width:18px; height:18px; min-height:18px; padding:0; border:2px solid #64748b; background:#fff; }
+    .checks .switch.on { background:var(--green); border-color:#15803d; box-shadow:inset 0 0 0 3px #dcfce7; }
+    .scrollbox { width:215px; height:70px; overflow:auto; border:1px solid #94a3b8; border-radius:6px; padding:5px; background:#f8fafc; }
+    .rowbtn { display:block; width:190px; margin:4px 0; height:22px; }
+    .bar { width:210px; height:16px; border:1px solid #94a3b8; background:#e2e8f0; border-radius:8px; overflow:hidden; margin-top:6px; }
+    .fill { width:0%; height:100%; background:linear-gradient(90deg,#22c55e,#2563eb); transition:width .2s linear; }
+    .tiny { font-size:11px; color:var(--muted); }
+    .modal { display:none; position:absolute; inset:16px; background:rgba(15,23,42,.92); color:white; border-radius:8px; padding:16px; z-index:5; }
+    .modal button { margin-top:12px; }
+  </style>
+</head>
+<body>
+<div id="anchor" aria-hidden="true"></div>
+<header><h1>AgentSight Human Command Pool 20</h1><div id="summary">0 / 20 complete</div></header>
+<div id="grid"></div>
+<script>
+const grid = document.getElementById('grid');
+const completed = new Set();
+function card(id, title, html) {
+  const c = document.createElement('section');
+  c.className = 'card'; c.id = `c${id}`;
+  c.innerHTML = `<h2>${id}. ${title}</h2>${html}<div class="status" id="s${id}">WAIT</div>`;
+  grid.appendChild(c); return c;
+}
+function mark(id, text) { completed.add(String(id)); const c=document.getElementById(`c${id}`); c.className='card pass'; document.getElementById(`s${id}`).textContent='PASS '+text; document.getElementById('summary').textContent=`${completed.size} / 20 complete`; }
+function warn(id, text) { const c=document.getElementById(`c${id}`); c.className='card warn'; document.getElementById(`s${id}`).textContent='WARN '+text; }
+card(1,'obvious button',`<button class="primary" id="b1">VISIBLE BUTTON</button>`); b1.onclick=()=>mark(1,'button');
+card(2,'short text input',`<input id="i2" placeholder="token"><button class="primary" id="b2">Save</button>`); b2.onclick=()=>{ if(i2.value.includes('pixel')) mark(2,'text'); else warn(2,'wrong text'); };
+card(3,'ten switches',`<div class="checks">${Array.from({length:10},(_,i)=>`<button class="switch" id="c3_${i}" aria-label="switch ${i+1}"></button>`).join('')}</div><button class="primary" id="b3">Commit</button>`); const c3done=()=>{ if(Array.from({length:10},(_,i)=>document.getElementById(`c3_${i}`).classList.contains('on')).every(Boolean)) mark(3,'10 toggles'); else warn(3,'missing toggles'); }; b3.onclick=c3done; for(let i=0;i<10;i++){document.getElementById(`c3_${i}`).onclick=(e)=>{e.currentTarget.classList.add('on');};}
+card(4,'8 color targets',`<div class="dots">${['blue','green','red','purple','orange','blue','green','red'].map((c,i)=>`<button class="dot ${c}" id="d4_${i}"></button>`).join('')}</div>`); let seq4=[]; for(let i=0;i<8;i++){document.getElementById(`d4_${i}`).onclick=()=>{seq4.push(i); if(seq4.join(',')==='0,1,2,3,4,5,6,7') mark(4,'ordered dots');};}
+card(5,'unique red target',`<button class="dot blue" style="margin:6px"></button><button class="dot green" style="margin:6px"></button><button class="dot red" id="b5" style="margin:6px"></button><button class="dot purple" style="margin:6px"></button>`); b5.onclick=()=>mark(5,'red');
+card(6,'scroll to marker',`<div class="scrollbox" id="sc6" tabindex="0">${Array.from({length:12},(_,i)=>`<button class="rowbtn" id="r6_${i}">row ${i+1}</button>`).join('')}</div>`); document.getElementById('r6_10').onclick=()=>mark(6,'row11'); sc6.onclick=()=>{ if(sc6.scrollTop>80) mark(6,'row11'); }; sc6.onscroll=()=>{ if(sc6.scrollTop>80) mark(6,'row11'); };
+card(7,'30 second wait',`<button class="primary" id="b7">Start 30s</button><div class="bar"><div class="fill" id="f7"></div></div>`); b7.onclick=()=>{f7.style.width='0%'; setTimeout(()=>{f7.style.width='100%'; mark(7,'30s');},30000);};
+card(8,'60 second observe',`<button class="primary" id="b8">Start 60s observe</button><div class="bar"><div class="fill" id="f8"></div></div>`); b8.onclick=()=>{f8.style.width='100%'; mark(8,'observe-started');};
+card(9,'two actions under 60s',`<button class="primary" id="b9a">First</button><button class="primary" id="b9b">Second</button>`); let first9=false; b9a.onclick=()=>{first9=true; warn(9,'first');}; b9b.onclick=()=>{ if(first9) mark(9,'continued'); }; c9.onclick=(e)=>{ if(e.target.id==='b9a'||e.target.id==='b9b') return; if(first9) mark(9,'continued'); else {first9=true; warn(9,'first');} };
+card(10,'ambiguous relocalize',`<button id="b10x">gray</button><button id="b10" class="primary">blue</button><button id="b10y">gray</button>`); b10.onclick=()=>mark(10,'fresh look target'); c10.onclick=(e)=>{ if(e.offsetX>70 && e.offsetX<160) mark(10,'fresh look target'); };
+card(11,'hybrid fixture click/input',`<input id="i11"><button class="primary" id="b11">Apply</button>`); b11.onclick=()=>{ if(i11.value==='hybrid-11') mark(11,'fixture'); else warn(11,'text'); };
+card(12,'10 text submissions',`<input id="i12"><button class="primary" id="b12">Add</button><span class="tiny" id="n12">0</span>`); let n12=0; b12.onclick=()=>{ if(i12.value.startsWith('item-')){n12++; document.getElementById('n12').textContent=n12; i12.value=''; if(n12>=10) mark(12,'10 items');}};
+card(13,'metadata + visual targets',`<div class="dots">${Array.from({length:8},(_,i)=>`<button class="dot ${i%2?'green':'blue'}" id="d13_${i}"></button>`).join('')}</div>`); let n13=0; for(let i=0;i<8;i++){document.getElementById(`d13_${i}`).onclick=()=>{n13++; if(n13>=8) mark(13,'8 targets');};}
+card(14,'foreground safe window',`<button class="primary" id="b14">Click</button><input id="i14" value=""><button id="b14s">Save</button>`); b14.onclick=()=>warn(14,'clicked'); b14s.onclick=()=>{ if(i14.value==='safe') mark(14,'click input save'); };
+card(15,'external timer param',`<button class="primary" id="b15">Start 5s</button><div class="bar"><div class="fill" id="f15"></div></div>`); b15.onclick=()=>setTimeout(()=>{f15.style.width='100%'; mark(15,'5s param');},5000);
+card(16,'periodic 10s checks',`<button class="primary" id="b16">Start</button><div class="bar"><div class="fill" id="f16"></div></div>`); b16.onclick=()=>{let pct=0; warn(16,'started'); const t=setInterval(()=>{pct+=34; f16.style.width=Math.min(100,pct)+'%'; if(pct>=100){clearInterval(t); mark(16,'3 checks');}},10000);};
+card(17,'5 local cards',`${Array.from({length:5},(_,i)=>`<button class="primary" id="b17_${i}">Card ${i+1}</button>`).join('')}`); let n17=0; for(let i=0;i<5;i++){document.getElementById(`b17_${i}`).onclick=()=>{n17++; if(n17>=5) mark(17,'5 cards');};}
+card(18,'modal obstruction',`<button class="primary" id="b18open">Open modal</button><button class="primary" id="b18main">Finish</button><div class="modal" id="m18">Blocking modal<br><button id="b18close">Close</button></div>`); b18open.onclick=()=>{m18.style.display='block';}; b18close.onclick=()=>{m18.style.display='none';}; m18.onclick=(e)=>{ if(e.target.id!=='b18open'){m18.style.display='none';} }; b18main.onclick=()=>{ if(m18.style.display!=='block') mark(18,'modal handled'); };
+card(19,'semantic conflict',`<button class="orange" id="b19o">Orange</button><button class="purple" id="b19p">Purple</button>`); b19o.onclick=()=>warn(19,'wrong external hint'); b19p.onclick=()=>mark(19,'pixel wins'); c19.onclick=(e)=>{ if(e.offsetX>80) mark(19,'pixel wins'); };
+card(20,'operation-log continuation',`<button class="primary" id="b20a">A</button><button class="primary" id="b20b">B</button>`); let a20=false; b20a.onclick=()=>{a20=true; warn(20,'A');}; b20b.onclick=()=>{ if(a20) mark(20,'A+B'); }; c20.onclick=(e)=>{ if(e.offsetX<80){a20=true; warn(20,'A');} else if(a20) mark(20,'A+B'); };
+const anchorParam = new URLSearchParams(location.search).get('anchor');
+if(anchorParam && /^[0-9a-fA-F]{6}$/.test(anchorParam)) document.getElementById('anchor').style.background = `#${anchorParam}`;
+const runParam = new URLSearchParams(location.search).get('run');
+if(runParam) document.title = `AgentSight Human Command Pool 20 ${runParam}`;
+</script>
+</body>
+</html>

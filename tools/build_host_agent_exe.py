@@ -9,14 +9,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SPECS = [
-    ROOT / "packaging" / "pyinstaller" / "AIControlHostAgent.spec",
-    ROOT / "packaging" / "pyinstaller" / "AIControlHostAgentInstaller.spec",
-    ROOT / "packaging" / "pyinstaller" / "AIControlHostAgentScenarios.spec",
-    ROOT / "packaging" / "pyinstaller" / "AIControlSessionSupervisor.spec",
-    ROOT / "packaging" / "pyinstaller" / "AIControlInstaller.spec",
-    ROOT / "packaging" / "pyinstaller" / "AIControlTray.spec",
-    ROOT / "packaging" / "pyinstaller" / "AIControlTrayGui.spec",
+    ROOT / "packaging" / "pyinstaller" / "AgentSightHostAgent.spec",
+    ROOT / "packaging" / "pyinstaller" / "AgentSightHostAgentInstaller.spec",
+    ROOT / "packaging" / "pyinstaller" / "AgentSightHostAgentScenarios.spec",
+    ROOT / "packaging" / "pyinstaller" / "AgentSightSupervisor.spec",
+    ROOT / "packaging" / "pyinstaller" / "AgentSightTray.spec",
+    ROOT / "packaging" / "pyinstaller" / "AgentSightTrayCli.spec",
     ROOT / "packaging" / "pyinstaller" / "AgentSightTimelineViewer.spec",
+    ROOT / "packaging" / "pyinstaller" / "AgentSightMcpServer.spec",
+    ROOT / "packaging" / "pyinstaller" / "AgentSightSetup.spec",
 ]
 
 
@@ -30,14 +31,14 @@ def build_report() -> dict[str, object]:
     missing = [str(path) for path in SPECS if not path.exists()]
     if missing:
         return {
-            "object_type": "AIControlExeBuildReport",
+            "object_type": "AgentSightExeBuildReport",
             "build_status": "spec_missing",
             "exit_code": 4,
             "missing_specs": missing,
         }
     if importlib.util.find_spec("PyInstaller") is None:
         return {
-            "object_type": "AIControlExeBuildReport",
+            "object_type": "AgentSightExeBuildReport",
             "build_status": "pyinstaller_missing",
             "exit_code": 4,
             "suggested_next": ["py -m pip install pyinstaller", "py tools/build_host_agent_exe.py"],
@@ -59,47 +60,48 @@ def build_report() -> dict[str, object]:
         )
         if completed.returncode != 0:
             return {
-                "object_type": "AIControlExeBuildReport",
+                "object_type": "AgentSightExeBuildReport",
                 "build_status": "build_failed",
                 "exit_code": completed.returncode,
                 "results": results,
             }
     wrappers = _write_dist_wrappers()
     return {
-        "object_type": "AIControlExeBuildReport",
+        "object_type": "AgentSightExeBuildReport",
         "build_status": "built",
         "exit_code": 0,
         "results": results,
         "wrapper_outputs": [str(path) for path in wrappers],
         "expected_outputs": [
-            str(ROOT / "dist" / "AIControlInstaller.exe"),
-            str(ROOT / "dist" / "AIControlSessionSupervisor.exe"),
-            str(ROOT / "dist" / "AIControlHostAgent.exe"),
-            str(ROOT / "dist" / "AIControlHostAgentInstaller.exe"),
-            str(ROOT / "dist" / "AIControlHostAgentScenarios.exe"),
-            str(ROOT / "dist" / "AIControlTray.exe"),
-            str(ROOT / "dist" / "AIControlTrayGui.exe"),
+            str(ROOT / "dist" / "AgentSightSetup.exe"),
+            str(ROOT / "dist" / "AgentSightSupervisor.exe"),
+            str(ROOT / "dist" / "AgentSightHostAgent.exe"),
+            str(ROOT / "dist" / "AgentSightHostAgentInstaller.exe"),
+            str(ROOT / "dist" / "AgentSightHostAgentScenarios.exe"),
+            str(ROOT / "dist" / "AgentSightTray.exe"),
+            str(ROOT / "dist" / "AgentSightTrayCli.exe"),
             str(ROOT / "dist" / "AgentSightTimelineViewer.exe"),
+            str(ROOT / "dist" / "AgentSightMcpServer.exe"),
         ],
     }
 
 
 def _write_dist_wrappers() -> list[Path]:
     dist = ROOT / "dist"
-    product_install = dist / "INSTALL_AI_CONTROL.cmd"
-    product_uninstall = dist / "UNINSTALL_AI_CONTROL.cmd"
-    install = dist / "INSTALL_AI_CONTROL_HOST_AGENT.cmd"
-    uninstall = dist / "UNINSTALL_AI_CONTROL_HOST_AGENT.cmd"
+    product_install = dist / "INSTALL_AGENTSIGHT.cmd"
+    product_uninstall = dist / "UNINSTALL_AGENTSIGHT.cmd"
+    install = dist / "INSTALL_AGENTSIGHT_HOST_AGENT.cmd"
+    uninstall = dist / "UNINSTALL_AGENTSIGHT_HOST_AGENT.cmd"
     product_install.write_text(
         "\r\n".join(
             [
                 "@echo off",
                 "cd /d \"%~dp0\"",
-                "echo Installing and starting AI Control Session Supervisor...",
-                "\"AIControlInstaller.exe\" install --agent-exe \"%~dp0AIControlHostAgent.exe\" --tray-gui-exe \"%~dp0AIControlTrayGui.exe\" --start-now --arm-real-input --wait-seconds 60",
+                "echo Installing and starting AgentSight Session Supervisor...",
+                "\"AgentSightSetup.exe\" install --start-now --arm-real-input --wait-seconds 60",
                 "echo.",
-                "echo Checking AI Control Session Supervisor status...",
-                "\"AIControlSessionSupervisor.exe\" status --output \"%~dp0..\\runs_session_supervisor_install_status_report.json\"",
+                "echo Checking AgentSight Session Supervisor status...",
+                "\"AgentSightSetup.exe\" status --output \"%~dp0..\\runs_session_supervisor_install_status_report.json\"",
                 "pause",
                 "",
             ]
@@ -111,7 +113,7 @@ def _write_dist_wrappers() -> list[Path]:
             [
                 "@echo off",
                 "cd /d \"%~dp0\"",
-                "\"AIControlInstaller.exe\" uninstall",
+                "\"AgentSightSetup.exe\" uninstall",
                 "pause",
                 "",
             ]
@@ -123,11 +125,11 @@ def _write_dist_wrappers() -> list[Path]:
             [
                 "@echo off",
                 "cd /d \"%~dp0\"",
-                "echo Legacy: installing and starting AI Control Host Agent split watchdog...",
-                "\"AIControlHostAgentInstaller.exe\" install --agent-exe \"%~dp0AIControlHostAgent.exe\" --start-now --wait-seconds 60",
+                "echo Legacy: installing and starting AgentSight Host Agent split watchdog...",
+                "\"AgentSightHostAgentInstaller.exe\" install --agent-exe \"%~dp0AgentSightHostAgent.exe\" --start-now --wait-seconds 60",
                 "echo.",
-                "echo Checking AI Control Host Agent health...",
-                "\"AIControlHostAgentScenarios.exe\" --scenario health --wait-seconds 60 --output \"%~dp0..\\runs_host_agent_install_health_report.json\"",
+                "echo Checking AgentSight Host Agent health...",
+                "\"AgentSightHostAgentScenarios.exe\" --scenario health --wait-seconds 60 --output \"%~dp0..\\runs_host_agent_install_health_report.json\"",
                 "pause",
                 "",
             ]
@@ -139,7 +141,7 @@ def _write_dist_wrappers() -> list[Path]:
             [
                 "@echo off",
                 "cd /d \"%~dp0\"",
-                "\"AIControlHostAgentInstaller.exe\" uninstall",
+                "\"AgentSightHostAgentInstaller.exe\" uninstall",
                 "pause",
                 "",
             ]

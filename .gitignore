@@ -4,6 +4,12 @@ runs_*/
 runs*/
 runs*.json
 runs*.txt
+runs_*.stdout
+runs_*.stderr
+runs_*.md
+*.log
+tmp_*/
+last-agent-report.json
 round*-runs/
 round*-*runs/
 *.local.json
@@ -26,7 +32,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# AI-Control private stage artifacts
+# AgentSight private stage artifacts
+reports/
 docs/reviews/
 *review_package*.md
 *REVIEW_PACKAGE*.md

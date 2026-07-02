@@ -22,18 +22,18 @@ A pixel-grounded observe-and-act host for Windows AI agents.
 
 为了不破坏当前入口，以下名称暂时保留：
 
-- Python 包：`ai_control`
-- console scripts：`ai-control-*`
-- 本地数据目录：`%LOCALAPPDATA%\ai-control`
-- 当前工作区：`C:\git\其他\ai-control`
-- 部分 exe 历史名：`AIControl*.exe`
+- Python 包：`agentsight`
+- console scripts：`agentsight-*`
+- 本地数据目录：`%LOCALAPPDATA%\AgentSight`
+- 当前工作区：`C:\git\其他\AgentSight`
+- 部分 exe 历史名：`AgentSight*.exe`
 
 ## 不要直接改当前工作区目录
 
 不要在当前活跃 Codex 工作区中直接把：
 
 ```text
-C:\git\其他\ai-control
+C:\git\其他\AgentSight
 ```
 
 改成：

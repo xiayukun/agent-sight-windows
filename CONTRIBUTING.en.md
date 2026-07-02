@@ -25,7 +25,7 @@ py tools/build_host_agent_exe.py
 - Keep raw evidence separate from cursor overlays, diff heatmaps, and annotated review artifacts.
 - Tray GUI is a human-visible control surface, not an AI semantic channel.
 - Do not commit `runs*`, `dist/`, `build/`, local caches, screenshot evidence, or tokens.
-- Do not rename the active `ai-control` workspace directory directly; public branding should move first through docs.
+- Do not rename the active `agentsight` workspace directory directly; public branding should move first through docs.
 
 ## Pull Request Checklist
 

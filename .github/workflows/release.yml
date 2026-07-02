@@ -14,6 +14,9 @@ on:
 permissions:
   contents: write
 
+env:
+  EXPECTED_RELEASE_REPOSITORY: xiayukun/agent-sight-windows
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -23,9 +26,21 @@ jobs:
         shell: pwsh
         run: |
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            "RELEASE_TAG=${{ inputs.tag }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $tag = "${{ inputs.tag }}"
           } else {
-            "RELEASE_TAG=${{ github.ref_name }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $tag = "${{ github.ref_name }}"
+          }
+          if (-not $tag.StartsWith("v")) {
+            throw "Release tag must start with v, got: $tag"
+          }
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RELEASE_VERSION=$($tag.TrimStart('v'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify GitHub release target
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REPOSITORY -ne $env:EXPECTED_RELEASE_REPOSITORY) {
+            throw "unexpected GitHub release repository: $env:GITHUB_REPOSITORY (expected $env:EXPECTED_RELEASE_REPOSITORY)"
           }
 
       - name: Checkout
@@ -57,19 +72,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
-          if (-not (Test-Path -LiteralPath ".\dist\AIControlSessionSupervisor.exe")) {
-            throw "Expected dist\AIControlSessionSupervisor.exe was not produced."
+          if (-not (Test-Path -LiteralPath ".\dist\AgentSightSetup.exe")) {
+            throw "Expected dist\AgentSightSetup.exe was not produced."
+          }
+          if (-not (Test-Path -LiteralPath ".\dist\AgentSightSupervisor.exe")) {
+            throw "Expected dist\AgentSightSupervisor.exe was not produced."
           }
 
-      - name: Generate SHA256 checksums
+      - name: Prepare release assets and SHA256 checksums
         shell: pwsh
         run: |
-          Get-ChildItem -LiteralPath ".\dist" -File |
-            Sort-Object Name |
-            ForEach-Object {
-              $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName
-              "$($hash.Hash.ToLower())  $($_.Name)"
-            } | Set-Content -LiteralPath ".\dist\SHA256SUMS.txt" -Encoding utf8
+          $releaseAssetsDir = ".\release_assets"
+          New-Item -ItemType Directory -Force -Path $releaseAssetsDir | Out-Null
+          $setupAssetName = "AgentSightSetup-$env:RELEASE_VERSION-windows-x64.exe"
+          $setupAssetPath = Join-Path $releaseAssetsDir $setupAssetName
+          Copy-Item -LiteralPath ".\dist\AgentSightSetup.exe" -Destination $setupAssetPath -Force
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $setupAssetPath).Hash.ToLower()
+          "$hash  $setupAssetName" | Set-Content -LiteralPath (Join-Path $releaseAssetsDir "AgentSightSetup-$env:RELEASE_VERSION-windows-x64.sha256.txt") -Encoding utf8
+          "$hash  $setupAssetName" | Set-Content -LiteralPath (Join-Path $releaseAssetsDir "SHA256SUMS.txt") -Encoding utf8
 
       - name: Resolve release notes
         shell: pwsh
@@ -92,11 +112,11 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AgentSight-Windows-${{ env.RELEASE_TAG }}
+          name: AgentSight-Windows-CI-build-${{ env.RELEASE_TAG }}
           path: |
             dist\*.exe
             dist\*.cmd
-            dist\SHA256SUMS.txt
+            release_assets\*
             build-report.json
           if-no-files-found: error
 
@@ -106,28 +126,39 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $title = "AgentSight for Windows $env:RELEASE_TAG"
-          $assets = @(
-            ".\dist\AIControlInstaller.exe",
-            ".\dist\AIControlSessionSupervisor.exe",
-            ".\dist\AIControlHostAgent.exe",
-            ".\dist\AIControlTrayGui.exe",
-            ".\dist\AIControlTray.exe",
-            ".\dist\AIControlHostAgentInstaller.exe",
-            ".\dist\AIControlHostAgentScenarios.exe",
-            ".\dist\INSTALL_AI_CONTROL.cmd",
-            ".\dist\UNINSTALL_AI_CONTROL.cmd",
-            ".\dist\SHA256SUMS.txt"
-          )
-          $existing = @()
-          foreach ($asset in $assets) {
-            if (Test-Path -LiteralPath $asset) {
-              $existing += $asset
+          $releaseAssets = @(Get-ChildItem -LiteralPath ".\release_assets" -File | Sort-Object Name)
+          if ($releaseAssets.Count -ne 3) {
+            throw "Expected exactly 3 release assets: versioned setup exe, setup sha256 txt, and SHA256SUMS.txt. Found $($releaseAssets.Count)."
+          }
+          $assetNames = @($releaseAssets | ForEach-Object { $_.Name })
+          foreach ($requiredAsset in @(
+            "AgentSightSetup-$env:RELEASE_VERSION-windows-x64.exe",
+            "AgentSightSetup-$env:RELEASE_VERSION-windows-x64.sha256.txt",
+            "SHA256SUMS.txt"
+          )) {
+            if ($assetNames -notcontains $requiredAsset) {
+              throw "Missing release asset: $requiredAsset"
             }
           }
+          foreach ($forbiddenAsset in @(
+            "AgentSightSupervisor.exe",
+            "AgentSightHostAgent.exe",
+            "AgentSightTray.exe",
+            "AgentSightMcpServer.exe",
+            "AgentSightHostAgentInstaller.exe",
+            "AgentSightHostAgentScenarios.exe",
+            "INSTALL_AGENTSIGHT.cmd",
+            "UNINSTALL_AGENTSIGHT.cmd"
+          )) {
+            if ($assetNames -contains $forbiddenAsset) {
+              throw "Internal executable or command must not be a GitHub Release front-page asset: $forbiddenAsset"
+            }
+          }
+          $assetPaths = @($releaseAssets | ForEach-Object { $_.FullName })
           gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --notes-file $env:RELEASE_NOTES --title $title
-            gh release upload $env:RELEASE_TAG @existing --repo $env:GITHUB_REPOSITORY --clobber
+            gh release upload $env:RELEASE_TAG $assetPaths --repo $env:GITHUB_REPOSITORY --clobber
           } else {
-            gh release create $env:RELEASE_TAG @existing --repo $env:GITHUB_REPOSITORY --title $title --notes-file $env:RELEASE_NOTES
+            gh release create $env:RELEASE_TAG $assetPaths --repo $env:GITHUB_REPOSITORY --title $title --notes-file $env:RELEASE_NOTES
           }
