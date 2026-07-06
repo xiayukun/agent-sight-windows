@@ -61,6 +61,7 @@ PAYLOAD_FIELDS: dict[str, set[str]] = {
         "max_artifacts",
         "max_frames",
         "max_pairs",
+        "image_response",
         "min_changed_pixel_ratio",
     },
     "do": {"v", "id", "op", "basis", "seq", "duration_ms", "post_observe"},
@@ -264,7 +265,10 @@ def validate_look_src(src: Any) -> dict[str, Any]:
 
 def validate_do_basis(basis: Any) -> dict[str, Any]:
     if not isinstance(basis, dict):
-        raise SchemaError("basis must be an object", field="basis")
+        raise SchemaError(
+            'basis must be an object. Call look first, then pass basis: {"view_id": "..."}',
+            field="basis",
+        )
     allowed = {"view_id", "point"}
     extra = set(basis) - allowed
     if extra:
@@ -544,6 +548,23 @@ def validate_request(raw: dict[str, Any]) -> ProtocolRequest:
     if command == "look":
         if payload.get("op", "look") != "look":
             raise SchemaError("look payload op must be 'look'", field="op")
+        image_response = payload.get("image_response")
+        if image_response is not None:
+            if not isinstance(image_response, dict):
+                raise SchemaError("look.image_response must be an object", field="image_response")
+            allowed_image_response = {"mode", "max_edge"}
+            extra_image_response = set(image_response) - allowed_image_response
+            if extra_image_response:
+                raise SchemaError(
+                    f"unknown look.image_response fields: {sorted(extra_image_response)}",
+                    field=sorted(extra_image_response)[0],
+                )
+            mode = image_response.get("mode", "inline_lowres")
+            if mode not in {"inline_lowres", "none"}:
+                raise SchemaError("look.image_response.mode must be inline_lowres or none", field="image_response")
+            max_edge = image_response.get("max_edge", 512)
+            if not isinstance(max_edge, int) or max_edge < 1 or max_edge > 1024:
+                raise SchemaError("look.image_response.max_edge must be 1..1024", field="image_response")
         q = payload.get("q")
         if q not in ALLOWED_LOOK_QUERY_TYPES:
             raise SchemaError(f"unsupported look q: {q!r}", field="q")

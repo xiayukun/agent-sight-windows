@@ -162,6 +162,7 @@ class ProtocolGateway:
         self.input_registry = InputChannelRegistry(input_channels, default_channel_ref=default_input_channel_ref)
         self.input_channel = self.input_registry.resolve()
         self.leases: dict[str, dict[str, Any]] = {}
+        self.runtime_observation_payloads: dict[str, dict[str, bytes]] = {}
         self.observations: dict[str, dict[str, Any]] = {}
         self.views: dict[str, dict[str, Any]] = {}
         self.candidates: dict[str, dict[str, Any]] = {}
@@ -211,6 +212,13 @@ class ProtocolGateway:
     def _remember_runtime_observation(self, observation_id: str | None, frame: dict[str, Any]) -> None:
         if not observation_id:
             return
+        runtime_payload = {
+            key: bytes(frame[key])
+            for key in ("_media_bytes", "_bgra_bytes")
+            if isinstance(frame.get(key), (bytes, bytearray, memoryview))
+        }
+        if runtime_payload:
+            self.runtime_observation_payloads[str(observation_id)] = runtime_payload
         stored = self._runtime_metadata_only(frame)
         if isinstance(stored, dict):
             stored["runtime_payload_retained"] = False
@@ -228,7 +236,12 @@ class ProtocolGateway:
 
     def _prune_runtime_indexes(self) -> None:
         while len(self.observations) > _MAX_RUNTIME_OBSERVATIONS:
-            self.observations.pop(next(iter(self.observations)), None)
+            observation_id = next(iter(self.observations))
+            self.observations.pop(observation_id, None)
+            self.runtime_observation_payloads.pop(observation_id, None)
+        for observation_id in list(self.runtime_observation_payloads):
+            if observation_id not in self.observations:
+                self.runtime_observation_payloads.pop(observation_id, None)
         while len(self.views) > _MAX_RUNTIME_VIEWS:
             self.views.pop(next(iter(self.views)), None)
 
@@ -238,6 +251,7 @@ class ProtocolGateway:
             key: self._runtime_metadata_only(value)
             for key, value in list(self.observations.items())[-_MAX_RUNTIME_OBSERVATIONS:]
         }
+        self.runtime_observation_payloads.clear()
         self.views = {
             key: self._runtime_metadata_only(value)
             for key, value in list(self.views.items())[-_MAX_RUNTIME_VIEWS:]

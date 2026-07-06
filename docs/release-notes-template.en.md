@@ -2,7 +2,7 @@
 
 [中文](release-notes-template.md) | English
 
-Copy this template to `docs/release-notes-vX.Y.Z.en.md`; the Chinese primary file is `docs/release-notes-vX.Y.Z.md`. The GitHub Release body should put Chinese first and English below it, or link to the English mirror.
+Copy this template to `docs/release-notes-vX.Y.Z.en.md`; the Chinese primary file is `docs/release-notes-vX.Y.Z.md`. GitHub Release bodies use the Chinese primary notes; English mirrors should be linked as documentation instead of being concatenated into the release body by the workflow.
 
 ## AgentSight for Windows vX.Y.Z
 

@@ -112,19 +112,11 @@ jobs:
         shell: pwsh
         run: |
           $zh = "docs/release-notes-$env:RELEASE_TAG.md"
-          $en = "docs/release-notes-$env:RELEASE_TAG.en.md"
           if (-not (Test-Path -LiteralPath $zh)) {
             $zh = "docs/release-notes-template.md"
           }
-          if (-not (Test-Path -LiteralPath $en)) {
-            $en = "docs/release-notes-template.en.md"
-          }
-          Get-Content -LiteralPath $zh | Set-Content -LiteralPath release-notes-combined.md -Encoding utf8
-          "" | Add-Content -LiteralPath release-notes-combined.md -Encoding utf8
-          "---" | Add-Content -LiteralPath release-notes-combined.md -Encoding utf8
-          "" | Add-Content -LiteralPath release-notes-combined.md -Encoding utf8
-          Get-Content -LiteralPath $en | Add-Content -LiteralPath release-notes-combined.md -Encoding utf8
-          "RELEASE_NOTES=release-notes-combined.md" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Get-Content -LiteralPath $zh | Set-Content -LiteralPath release-notes-body.md -Encoding utf8
+          "RELEASE_NOTES=release-notes-body.md" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4

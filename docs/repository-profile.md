@@ -45,8 +45,9 @@ pixel-grounded
 screen-observation
 mouse-keyboard
 human-input
+screen-monitoring
+mkv
 audit-trail
-replay
 evidence
 local-first
 python
@@ -58,7 +59,7 @@ windows-gui
 逗号分隔版本：
 
 ```text
-windows, windows-ai, ai-agents, computer-use, gui-automation, desktop-automation, mcp, model-context-protocol, pixel-grounded, screen-observation, mouse-keyboard, human-input, audit-trail, replay, evidence, local-first, python, pyinstaller, agent-tools, windows-gui
+windows, windows-ai, ai-agents, computer-use, gui-automation, desktop-automation, mcp, model-context-protocol, pixel-grounded, screen-observation, mouse-keyboard, human-input, screen-monitoring, mkv, audit-trail, evidence, local-first, python, pyinstaller, agent-tools
 ```
 
 ## README 首屏要传达什么
@@ -75,8 +76,8 @@ windows, windows-ai, ai-agents, computer-use, gui-automation, desktop-automation
 首屏推荐一个安装器和 checksum，不把内部 exe 摊开给普通用户：
 
 ```text
-AgentSightSetup-1.0.0-windows-x64.exe
-AgentSightSetup-1.0.0-windows-x64.sha256.txt
+AgentSightSetup-1.0.1-windows-x64.exe
+AgentSightSetup-1.0.1-windows-x64.sha256.txt
 SHA256SUMS.txt
 ```
 

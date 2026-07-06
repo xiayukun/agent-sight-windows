@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import queue
+import subprocess
+import sys
 import tempfile
+import threading
 import time
 import unittest
 from io import BytesIO
@@ -27,6 +32,7 @@ from agentsight.host_agent.server import (
 )
 from agentsight.protocol.schemas import SchemaError, validate_request
 from agentsight.segments import BinarySegmentWriter
+from agentsight.segments.mkv_container import MkvSegmentWriter, timestamp_iso
 from agentsight.tray.state import apply_recording_policy_settings, default_tray_config_file, write_default_tray_config_if_missing
 
 
@@ -307,8 +313,17 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             adapter = MCPStdioAdapter(runs_dir=temp_dir)
             tools = adapter.list_tools()["tools"]
+            initialize = adapter.handle_message({"method": "initialize", "params": {}})
+            self_check = adapter.handle_message({"method": "agentsight/self_check", "params": {}})
 
         self.assertEqual([tool["name"] for tool in tools], ["screen", "look", "do"])
+        self.assertTrue(initialize["ok"])
+        self.assertEqual(initialize["data"]["serverInfo"]["name"], "agentsight")
+        self.assertEqual(initialize["data"]["capabilities"]["tools"]["public_tool_names"], ["screen", "look", "do"])
+        self.assertTrue(self_check["ok"])
+        self.assertEqual(self_check["data"]["mcp_server_name"], "agentsight")
+        self.assertEqual(self_check["data"]["expected_client_tool_names"], ["mcp__agentsight__screen", "mcp__agentsight__look", "mcp__agentsight__do"])
+        self.assertFalse(self_check["data"].get("token_returned"))
         for tool in tools:
             self.assertFalse(tool["inputSchema"]["additionalProperties"])
         self.assertEqual(tool_schema("look")["required"], ["q", "src", "r", "scale_down"])
@@ -319,6 +334,76 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
         self.assertNotIn("observe", MCP_TOOL_NAMES)
         self.assertNotIn("query_visual_memory", MCP_TOOL_NAMES)
         self.assertNotIn("run_limited_batch", MCP_TOOL_NAMES)
+
+    def test_mcp_stdio_jsonrpc_server_streams_enveloped_tool_discovery_without_eof(self) -> None:
+        project_root = Path(__file__).resolve().parents[2]
+        env = {**os.environ, "PYTHONPATH": str(project_root / "src")}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            process = subprocess.Popen(
+                [sys.executable, "-m", "agentsight.adapters.mcp.server"],
+                cwd=temp_dir,
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            output_lines: queue.Queue[str] = queue.Queue()
+
+            def read_stdout_line() -> None:
+                assert process.stdout is not None
+                output_lines.put(process.stdout.readline())
+
+            try:
+                assert process.stdin is not None
+                for request in [
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {"protocolVersion": "2024-11-05", "capabilities": {}},
+                    },
+                    {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "tools/call",
+                        "params": {"name": "agentsight/self_check", "arguments": {}},
+                    },
+                ]:
+                    reader = threading.Thread(target=read_stdout_line, daemon=True)
+                    reader.start()
+                    process.stdin.write(json.dumps(request) + "\n")
+                    process.stdin.flush()
+                    try:
+                        line = output_lines.get(timeout=5)
+                    except queue.Empty:
+                        self.fail("MCP stdio server did not respond before stdin EOF")
+                    reader.join(timeout=1)
+                    self.assertTrue(line.strip(), "MCP stdio server did not respond before stdin EOF")
+                    response = json.loads(line)
+                    self.assertEqual(response["jsonrpc"], "2.0")
+                    self.assertEqual(response["id"], request["id"])
+                    if request["method"] == "tools/call":
+                        self.assertIn("error", response)
+                        self.assertNotIn("result", response)
+                        self.assertEqual(response["error"]["data"]["allowed_tools"], ["screen", "look", "do"])
+                    else:
+                        self.assertIn("result", response)
+                    if request["method"] == "tools/list":
+                        self.assertEqual([tool["name"] for tool in response["result"]["tools"]], ["screen", "look", "do"])
+            finally:
+                if process.stdin is not None:
+                    process.stdin.close()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+                if process.stdout is not None:
+                    process.stdout.close()
+                if process.stderr is not None:
+                    process.stderr.close()
 
     def test_gateway_usage_guide_recommends_public_look_instead_of_legacy_visual_memory_query(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -349,6 +434,23 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
                     },
                 }
             )
+
+    def test_public_do_missing_basis_error_includes_minimal_view_id_example(self) -> None:
+        with self.assertRaises(SchemaError) as raised:
+            validate_request(
+                {
+                    "command": "do",
+                    "payload": {
+                        "v": "V1",
+                        "id": "keyboard-without-basis",
+                        "seq": [{"t": "key", "key": "ENTER"}],
+                    },
+                }
+            )
+
+        message = str(raised.exception)
+        self.assertIn('basis: {"view_id": "..."}', message)
+        self.assertIn("Call look first", message)
 
     def test_public_screen_look_do_embed_readiness_without_health_tool(self) -> None:
         observation = P3ALookPngChannel()
@@ -476,6 +578,220 @@ class P3AScreenLookDoProtocolTest(unittest.TestCase):
         self.assertEqual(look["view_record"]["segment_restore_ref"]["frame_id"], "f000001")
         self.assertEqual(look["view_record"]["transform"]["view_pixels_to_virtual_screen_pixels"]["scale_x"], 1)
         self.assertFalse(look["tool_asserts_business_success"])
+
+    def test_http_look_inline_lowres_review_image_is_json_consumable_and_derived(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            observe_dir = Path(temp_dir) / "observe"
+            observe_dir.mkdir()
+            fake_adapter = P3AHostSegmentFakeAdapter(observe_dir=observe_dir)
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter", return_value=fake_adapter):
+                status, look = _host_agent_protocol_look(
+                    visual_sessions={},
+                    protocol_views={},
+                    runs_dir=temp_dir,
+                    request={
+                        "v": "V1",
+                        "id": "host-look-inline-lowres",
+                        "q": "frame",
+                        "src": {"type": "screen", "t": "latest"},
+                        "r": {"x": 0, "y": 0, "w": 24, "h": 18},
+                        "scale_down": 2,
+                        "image_response": {"mode": "inline_lowres", "max_edge": 64},
+                    },
+                )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(look["image_content_returned"])
+        self.assertEqual(look["review_image"]["type"], "image")
+        self.assertEqual(look["review_image"]["mimeType"], "image/png")
+        self.assertTrue(look["review_image"]["data"])
+        self.assertEqual(look["review_image"]["raw_or_derived"], "derived_review_only")
+        self.assertFalse(look["review_image"]["canonical"])
+        self.assertFalse(look["derived_review_file_written"])
+
+    def test_http_look_image_response_object_defaults_to_inline_lowres_review_image(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            observe_dir = Path(temp_dir) / "observe"
+            observe_dir.mkdir()
+            fake_adapter = P3AHostSegmentFakeAdapter(observe_dir=observe_dir)
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter", return_value=fake_adapter):
+                status, look = _host_agent_protocol_look(
+                    visual_sessions={},
+                    protocol_views={},
+                    runs_dir=temp_dir,
+                    request={
+                        "v": "V1",
+                        "id": "host-look-image-response-default",
+                        "q": "frame",
+                        "src": {"type": "screen", "t": "latest"},
+                        "r": {"x": 0, "y": 0, "w": 24, "h": 18},
+                        "scale_down": 2,
+                        "image_response": {},
+                    },
+                )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(look["image_content_returned"])
+        self.assertEqual(look["image_response"]["mode"], "inline_lowres")
+        self.assertEqual(look["image_response"]["max_edge"], 512)
+        self.assertEqual(look["review_image"]["type"], "image")
+        self.assertEqual(look["review_image"]["raw_or_derived"], "derived_review_only")
+        self.assertFalse(look["review_image"]["canonical"])
+
+    def test_http_look_inline_lowres_review_image_respects_max_edge(self) -> None:
+        import base64
+
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            observe_dir = Path(temp_dir) / "observe"
+            observe_dir.mkdir()
+            fake_adapter = P3AHostSegmentFakeAdapter(observe_dir=observe_dir)
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter", return_value=fake_adapter):
+                status, look = _host_agent_protocol_look(
+                    visual_sessions={},
+                    protocol_views={},
+                    runs_dir=temp_dir,
+                    request={
+                        "v": "V1",
+                        "id": "host-look-inline-lowres-max-edge",
+                        "q": "frame",
+                        "src": {"type": "screen", "t": "latest"},
+                        "r": {"x": 0, "y": 0, "w": 2048, "h": 1024},
+                        "scale_down": 1,
+                        "image_response": {"mode": "inline_lowres", "max_edge": 64},
+                    },
+                )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(look["image_content_returned"])
+        self.assertEqual(look["image_response"]["max_edge"], 64)
+        image = Image.open(BytesIO(base64.b64decode(look["review_image"]["data"])))
+        self.assertLessEqual(max(image.size), 64)
+        self.assertEqual(look["review_image"]["raw_or_derived"], "derived_review_only")
+        self.assertFalse(look["review_image"]["canonical"])
+
+    def test_http_look_inline_lowres_review_image_decodes_mkv_only_segment_frame(self) -> None:
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            segment_path = root / "visual-default" / "segments" / "agentsight-20260703-001.mkv"
+            image = Image.new("RGBA", (24, 18), (80, 90, 120, 255))
+            writer = MkvSegmentWriter(segment_path, segment_id="agentsight-20260703-001", width=24, height=18)
+            record = writer.add_frame(
+                image.tobytes("raw", "BGRA"),
+                captured_at_ms=int(time.time() * 1000),
+                timestamp_iso=timestamp_iso(time.time()),
+                source="look",
+                event_id=None,
+                cursor_mode="none",
+                capture_content_degenerate=False,
+                screen_region={"x": 0, "y": 0, "w": 24, "h": 18},
+                coordinate_system="virtual_screen_pixels",
+            )
+            writer.close()
+
+            class MkvOnlySegmentAdapter(P3AHostFakeAdapter):
+                def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+                    if name == "get_capabilities":
+                        return {"ok": True, "data": {"object_type": "Capabilities"}}
+                    if name == "observe":
+                        region = (arguments or {}).get("region") or {"x": 0, "y": 0, "width": 24, "height": 18}
+                        return {
+                            "ok": True,
+                            "data": {
+                                "object_type": "ObservationFrame",
+                                "observation_id": "obs-host-mkv-only",
+                                "captured_at": time.time(),
+                                "timestamp": time.time(),
+                                "media_mime": "image/png",
+                                "width": int(region["width"]),
+                                "height": int(region["height"]),
+                                "screen_region": region,
+                                "coordinate_system": "virtual_screen_pixels",
+                                "default_media_file_written": False,
+                                "canonical_storage_target": ".mkv",
+                                "segment_frame": {
+                                    "schema": "agentsight_segment_frame_ref_v1",
+                                    "segment_id": "agentsight-20260703-001",
+                                    "storage_format": "mkv_vfr",
+                                    "frame_id": record["frame_id"],
+                                    "source": "look",
+                                    "raw_or_derived": "raw",
+                                    "restore_ref": record["restore_ref"],
+                                },
+                            },
+                        }
+                    return super().call_tool(name, arguments)
+
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter", return_value=MkvOnlySegmentAdapter()):
+                status, look = _host_agent_protocol_look(
+                    visual_sessions={},
+                    protocol_views={},
+                    runs_dir=temp_dir,
+                    request={
+                        "v": "V1",
+                        "id": "host-look-inline-lowres-mkv-only",
+                        "q": "frame",
+                        "src": {"type": "screen", "t": "latest"},
+                        "r": {"x": 0, "y": 0, "w": 24, "h": 18},
+                        "scale_down": 1,
+                        "image_response": {"mode": "inline_lowres", "max_edge": 12},
+                    },
+                )
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("path", look["view"])
+        self.assertTrue(look["image_content_returned"])
+        self.assertEqual(look["review_image"]["type"], "image")
+        self.assertEqual(look["review_image"]["mimeType"], "image/png")
+        self.assertTrue(look["review_image"]["data"])
+        self.assertEqual(look["image_response"]["max_edge"], 12)
+        self.assertEqual(look["review_image"]["raw_or_derived"], "derived_review_only")
+        self.assertFalse(look["review_image"]["canonical"])
+        self.assertFalse(look["derived_review_file_written"])
+
+    def test_http_look_inline_lowres_uses_runtime_frame_bytes_when_live_mkv_decode_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            def build_adapter(**kwargs: Any) -> MCPStdioAdapter:
+                channel = P3AMemoryLookChannel()
+                channel.name = "windows_software_observation"
+                return MCPStdioAdapter(
+                    runs_dir=kwargs["runs_dir"],
+                    observation_channels=[channel],
+                    default_observation_channel_ref=channel.name,
+                )
+
+            with mock.patch("agentsight.host_agent.server.build_manual_windows_input_adapter", side_effect=build_adapter):
+                with mock.patch(
+                    "agentsight.host_agent.server.decode_segment_region_to_image_content",
+                    side_effect=RuntimeError("File ended prematurely"),
+                ):
+                    status, look = _host_agent_protocol_look(
+                        visual_sessions={},
+                        protocol_views={},
+                        runs_dir=temp_dir,
+                        request={
+                            "v": "V1",
+                            "id": "host-look-inline-lowres-live-mkv-runtime-bytes",
+                            "q": "frame",
+                            "src": {"type": "screen", "t": "latest"},
+                            "r": {"x": 0, "y": 0, "w": 24, "h": 18},
+                            "scale_down": 1,
+                            "image_response": {"mode": "inline_lowres", "max_edge": 12},
+                        },
+                    )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(look["image_content_returned"])
+        self.assertEqual(look["review_image"]["type"], "image")
+        self.assertEqual(look["review_image"]["mimeType"], "image/png")
+        self.assertTrue(look["review_image"]["data"])
+        self.assertEqual(look["image_response"]["max_edge"], 12)
+        self.assertEqual(look["review_image"]["raw_or_derived"], "derived_review_only")
+        self.assertFalse(look["review_image"]["canonical"])
+        self.assertFalse(look["derived_review_file_written"])
 
     def test_host_look_view_record_separates_screen_region_from_decoded_region(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

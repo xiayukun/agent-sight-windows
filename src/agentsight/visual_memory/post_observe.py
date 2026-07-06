@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -19,6 +20,7 @@ def build_post_action_observation_window(
     threshold = float(request.get("stable_threshold", 0.001))
     stable_frame_count = int(request.get("stable_frame_count", 2))
     requested_frame_count = int(request.get("frame_count", len(frames)))
+    interval_ms = int(request.get("interval_ms", 0))
     stop_when_stable = bool(request.get("stop_when_stable", False))
     comparisons: list[dict[str, Any]] = []
 
@@ -69,6 +71,9 @@ def build_post_action_observation_window(
         stable=stable,
     )
     stopped_early = stop_when_stable and stable and len(frames) < requested_frame_count
+    sampled_time_span_ms = _sampled_time_span_ms(frames)
+    expected_sample_span_ms = max(0, (requested_frame_count - 1) * interval_ms)
+    requested_sampling_window_ms = max(0, requested_frame_count * interval_ms)
 
     return {
         "object_type": "PostActionObservationWindow",
@@ -80,6 +85,10 @@ def build_post_action_observation_window(
         "coordinate_system": coordinate_system,
         "baseline_frame_ref": baseline_frame.get("observation_id") if isinstance(baseline_frame, dict) else None,
         "sampled_frame_count": len(frames),
+        "sampled_time_span_ms": sampled_time_span_ms,
+        "expected_sample_span_ms": expected_sample_span_ms,
+        "requested_sampling_window_ms": requested_sampling_window_ms,
+        "sampling_time_basis": "frame_capture_timestamps",
         "sampled_frames": [_frame_ref(frame, index) for index, frame in enumerate(frames)],
         "comparison_count": len(comparisons),
         "comparisons": comparisons,
@@ -96,6 +105,11 @@ def build_post_action_observation_window(
             "stable_frame_count_required": stable_frame_count,
             "requested_frame_count": requested_frame_count,
             "max_frame_count": requested_frame_count,
+            "interval_ms": interval_ms,
+            "sampled_time_span_ms": sampled_time_span_ms,
+            "expected_sample_span_ms": expected_sample_span_ms,
+            "requested_sampling_window_ms": requested_sampling_window_ms,
+            "sampling_time_basis": "frame_capture_timestamps",
             "stop_when_stable": stop_when_stable,
             "stopped_early": stopped_early,
             "sampling_stop_reason": sampling_stop_reason,
@@ -255,6 +269,37 @@ def _frame_ref(frame: dict[str, Any], index: int) -> dict[str, Any]:
         "raw_canonical": True,
         "returns_image_path": False,
     }
+
+
+def _sampled_time_span_ms(frames: list[dict[str, Any]]) -> int | None:
+    if len(frames) < 2:
+        return 0 if frames else None
+    values = [_frame_timestamp_ms(frame) for frame in frames]
+    if any(value is None for value in values):
+        return None
+    return max(0, int(values[-1] or 0) - int(values[0] or 0))
+
+
+def _frame_timestamp_ms(frame: dict[str, Any]) -> int | None:
+    for key in ("captured_at", "timestamp", "captured_time", "source_time"):
+        value = frame.get(key)
+        if value is None:
+            continue
+        if isinstance(value, (int, float)):
+            return int(float(value) * 1000) if float(value) < 10_000_000_000 else int(float(value))
+        if isinstance(value, str) and value.strip():
+            text = value.strip()
+            try:
+                numeric = float(text)
+                return int(numeric * 1000) if numeric < 10_000_000_000 else int(numeric)
+            except ValueError:
+                pass
+            try:
+                normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+                return int(datetime.fromisoformat(normalized).timestamp() * 1000)
+            except ValueError:
+                pass
+    return None
 
 
 def _safe_request(request: dict[str, Any]) -> dict[str, Any]:

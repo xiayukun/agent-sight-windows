@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 from subprocess import DEVNULL, Popen
-from typing import Any
+from typing import Any, TextIO
 
 from agentsight.host_agent.interactive_task import completed_process_report, run_process
 from agentsight.session_supervisor import (
@@ -30,7 +30,7 @@ from agentsight.tray.state import (
 
 
 INSTALLER_SCHEMA = "agentsight_setup_installer_v1"
-AGENTSIGHT_VERSION = "1.0.0"
+AGENTSIGHT_VERSION = "1.0.1"
 PAYLOAD_DIR_NAME = "agentsight_payload"
 MCP_PUBLIC_EXE_NAME = "AgentSightMcp.exe"
 MCP_SERVER_EXE_NAME = "AgentSightMcpServer.exe"
@@ -68,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
             wait_seconds=float(parsed.wait_seconds),
             show_prompt=not bool(parsed.no_gui),
             output=parsed.output,
+            progress_stream=sys.stderr,
         )
         _write_json_report(report, parsed.output)
         _print_human_summary(report)
@@ -115,7 +116,7 @@ def _build_parser() -> argparse.ArgumentParser:
     install.add_argument("--arm-real-input", dest="arm_real_input", action="store_true", help="Allow the installed Host Agent to attempt real input when ready (default).")
     install.add_argument("--no-arm-real-input", dest="arm_real_input", action="store_false")
     install.add_argument("--wait-seconds", type=float, default=60.0)
-    install.add_argument("--no-gui", action="store_true", help="Do not show the final MessageBox prompt.")
+    install.add_argument("--no-gui", action="store_true", help="Do not show the final copyable completion prompt.")
     install.add_argument("--output", default=None)
 
     status = subcommands.add_parser("status", description="Read AgentSight install/runtime status.")
@@ -144,7 +145,10 @@ def install_agentsight(
     wait_seconds: float = 60.0,
     show_prompt: bool = True,
     output: str | None = None,
+    progress_stream: TextIO | None = None,
 ) -> dict[str, Any]:
+    progress = _new_install_progress(visible_output="console" if progress_stream is not None else "none")
+    _emit_install_progress(progress, "prepare_install_dirs", "Preparing install directories", progress_stream)
     install_root = _default_install_root()
     app_version_dir = install_root / "app" / version
     current_dir = install_root / "current"
@@ -152,19 +156,31 @@ def install_agentsight(
     install_root.mkdir(parents=True, exist_ok=True)
     app_version_dir.mkdir(parents=True, exist_ok=True)
     current_dir.mkdir(parents=True, exist_ok=True)
+    _record_install_progress(progress, "prepare_install_dirs", "Preparing install directories")
 
+    _emit_install_progress(progress, "stop_existing_supervisor", "Stopping an existing AgentSight supervisor if needed", progress_stream)
     pre_existing_supervisor = _stop_existing_packaged_supervisor_before_payload_copy(
         current_dir=current_dir,
         wait_seconds=wait_seconds,
     )
+    _record_install_progress(progress, "stop_existing_supervisor", "Stopping an existing AgentSight supervisor if needed")
     resolved_payload = _payload_source_dir(payload_dir)
+    _emit_install_progress(progress, "copy_payload", "Copying packaged AgentSight files", progress_stream)
     payload_copy = _copy_payload(resolved_payload, app_version_dir=app_version_dir, current_dir=current_dir)
     self_copy = _copy_self_setup(payload_dir=resolved_payload, app_version_dir=app_version_dir, current_dir=current_dir)
     mcp_public_alias = _ensure_mcp_public_exe_alias(app_version_dir=app_version_dir, current_dir=current_dir)
+    _record_install_progress(progress, "copy_payload", "Copying packaged AgentSight files")
+    _emit_install_progress(progress, "write_runtime_files", "Writing runtime defaults", progress_stream)
     defaults = _write_default_runtime_files()
+    _record_install_progress(progress, "write_runtime_files", "Writing runtime defaults")
+    _emit_install_progress(progress, "write_ai_install", "Writing AI install handoff package", progress_stream)
     ai_install = _write_ai_install_package(install_root=install_root, ai_install_dir=ai_install_dir, current_dir=current_dir)
+    _record_install_progress(progress, "write_ai_install", "Writing AI install handoff package")
+    _emit_install_progress(progress, "write_uninstall_entry", "Writing uninstall entry", progress_stream)
     uninstall_entry = _write_uninstall_entry(install_root=install_root, current_dir=current_dir)
+    _record_install_progress(progress, "write_uninstall_entry", "Writing uninstall entry")
 
+    _emit_install_progress(progress, "install_startup", "Registering startup and starting AgentSight", progress_stream)
     supervisor_install = _install_with_packaged_supervisor(
         current_dir=current_dir,
         host=host,
@@ -177,6 +193,7 @@ def install_agentsight(
         arm_real_input=arm_real_input,
         wait_seconds=wait_seconds,
     )
+    _record_install_progress(progress, "install_startup", "Registering startup and starting AgentSight")
     status = product_status(output=None)
     copy_prompt = _copy_prompt(install_root)
     report: dict[str, Any] = {
@@ -199,6 +216,8 @@ def install_agentsight(
         "startup": supervisor_install,
         "status": status,
         "copy_prompt": copy_prompt,
+        "completion_prompt_ui": _completion_prompt_ui_contract(),
+        "progress": progress,
         "prompt_shown": False,
         "output": output,
         "network_binding_default": host,
@@ -211,10 +230,19 @@ def install_agentsight(
         "exit_code": int(supervisor_install.get("exit_code", 0) or 0),
     }
     report_file = install_root / "last-install-report.json"
+    _emit_install_progress(progress, "write_report", "Writing install report", progress_stream)
+    _record_install_progress(progress, "write_report", "Writing install report")
     _write_json_path(report_file, report)
     report["install_report_file"] = str(report_file)
+    _emit_install_progress(progress, "complete", "AgentSight setup complete", progress_stream)
+    _record_install_progress(progress, "complete", "AgentSight setup complete")
+    _write_json_path(report_file, report)
     if show_prompt:
-        report["prompt_shown"] = _show_install_prompt(copy_prompt)
+        prompt_result = _show_install_prompt(copy_prompt)
+        report["prompt_shown"] = bool(prompt_result.get("shown"))
+        ui_contract = prompt_result.get("ui_contract")
+        if isinstance(ui_contract, dict):
+            report["completion_prompt_ui"] = ui_contract
         _write_json_path(report_file, report)
     return report
 
@@ -1022,6 +1050,70 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _new_install_progress(*, visible_output: str) -> dict[str, Any]:
+    return {
+        "status": "visible",
+        "schema": "agentsight_setup_progress_v1",
+        "visible_output": visible_output,
+        "events": [],
+    }
+
+
+def _emit_install_progress(progress: dict[str, Any], key: str, message: str, stream: TextIO | None) -> None:
+    if stream is None:
+        return
+    visible_events = progress.setdefault("visible_events", [])
+    event = {
+        "key": key,
+        "message": message,
+        "visible_at_ms": _now_ms(),
+    }
+    if isinstance(visible_events, list):
+        visible_events.append(event)
+    print(f"[AgentSight Setup] {message}", file=stream, flush=True)
+
+
+def _record_install_progress(progress: dict[str, Any], key: str, message: str) -> None:
+    events = progress.setdefault("events", [])
+    event = {
+        "key": key,
+        "message": message,
+        "completed_at_ms": _now_ms(),
+    }
+    if isinstance(events, list):
+        events.append(event)
+
+
+def _completion_prompt_ui_contract() -> dict[str, Any]:
+    return {
+        "ui": "copyable_win32_dialog",
+        "copy_button": True,
+        "readonly_multiline_text": True,
+        "selectable_text": True,
+        "legacy_message_box": False,
+    }
+
+
+def _legacy_message_box_prompt_ui_contract() -> dict[str, Any]:
+    return {
+        "ui": "legacy_message_box",
+        "copy_button": False,
+        "readonly_multiline_text": False,
+        "selectable_text": False,
+        "legacy_message_box": True,
+    }
+
+
+def _prompt_not_shown_ui_contract() -> dict[str, Any]:
+    return {
+        "ui": "not_shown",
+        "copy_button": False,
+        "readonly_multiline_text": False,
+        "selectable_text": False,
+        "legacy_message_box": False,
+    }
+
+
 def _copy_prompt(install_root: Path) -> str:
     return (
         "AgentSight for Windows 已安装在本机。请读取下面目录中的 mcp.json、SKILL.md 和 README_FOR_AI.md，"
@@ -1051,6 +1143,91 @@ def _ai_install_readme(install_root: Path, current_dir: Path) -> str:
             "3. 如果客户端只接受目录式 Skill，也可以使用兼容副本 `agentsight/SKILL.md`。",
             "4. 完成接入后，MCP public tools 只使用 `screen`、`look`、`do`。",
             "",
+            "Five-request happy path quickstart:",
+            "",
+            "This is the ordinary `screen -> look -> do -> look` path in five requests or fewer. Step 0 reads local discovery and is setup, not a Host Agent HTTP request.",
+            "",
+            "0. read discovery from `%LOCALAPPDATA%\\AgentSight\\host-agent.json`; use only `url`, bearer `token`, and `api.screen` / `api.look` / `api.do`.",
+            "1. `/screen` readiness and virtual desktop bounds:",
+            "",
+            '```json',
+            '{"v": "V1", "id": "screen-1", "op": "screen"}',
+            '```',
+            "",
+            "2. full `/look` over the current desktop pixels; fill `r` from `/screen` bounds:",
+            "",
+            '```json',
+            '{',
+            '  "v": "V1",',
+            '  "id": "look-1",',
+            '  "op": "look",',
+            '  "q": "frame",',
+            '  "src": {"type": "screen", "t": "latest"},',
+            '  "r": {"x": 0, "y": 0, "w": 1920, "h": 1080},',
+            '  "scale_down": 4,',
+            '  "image_response": {"mode": "inline_lowres", "max_edge": 512}',
+            '}',
+            '```',
+            "",
+            "3. `/do` from the `view.id` returned by `look-1`. Minimal mouse click + typing JSON:",
+            "",
+            '```json',
+            '{',
+            '  "v": "V1",',
+            '  "id": "do-1",',
+            '  "op": "do",',
+            '  "basis": {"view_id": "<view.id from look-1>"},',
+            '  "seq": [',
+            '    {"t": "move", "x": 320, "y": 240, "coord": "view", "move": "instant"},',
+            '    {"t": "click", "b": "left"},',
+            '    100,',
+            '    {"t": "text", "text": "hello"}',
+            '  ]',
+            '}',
+            '```',
+            "",
+            "Minimal pure keyboard JSON. Even pure keyboard input still requires basis.view_id from a current `/look`:",
+            "",
+            '```json',
+            '{',
+            '  "v": "V1",',
+            '  "id": "do-keyboard-1",',
+            '  "op": "do",',
+            '  "basis": {"view_id": "<view.id from look-1>"},',
+            '  "seq": [',
+            '    {"t": "key", "key": "TAB"},',
+            '    {"t": "text", "text": "hello"}',
+            '  ]',
+            '}',
+            '```',
+            "",
+            "4. after `/look` observes fresh pixels after input:",
+            "",
+            '```json',
+            '{',
+            '  "v": "V1",',
+            '  "id": "look-after-1",',
+            '  "op": "look",',
+            '  "q": "frame",',
+            '  "src": {"type": "screen", "t": "latest"},',
+            '  "r": {"x": 0, "y": 0, "w": 1920, "h": 1080},',
+            '  "scale_down": 4,',
+            '  "image_response": {"mode": "inline_lowres", "max_edge": 512}',
+            '}',
+            '```',
+            "",
+            "When to use AgentSight:",
+            "",
+            "- Use AgentSight for visible Windows GUI tasks where an AI must inspect real pixels and send human-equivalent mouse/keyboard input.",
+            "- Use AgentSight for screen monitoring, timeline review, operation-log review, and MKV VFR evidence inspection when pixel-grounded auditability matters.",
+            "- Use AgentSight when the target application has no safe direct API and the operator wants a visible, local-first control surface.",
+            "",
+            "When not to use AgentSight:",
+            "",
+            "- Prefer a direct API for structured data, backend jobs, downloads, or service administration when a safe API exists.",
+            "- do not use AgentSight as a shell substitute, background business API, OCR layer, clipboard bridge, DOM reader, accessibility-tree reader, or window-semantics provider.",
+            "- Do not use AgentSight to claim target hit, causality, or business success; those are caller-side judgments over evidence.",
+            "",
             "文件说明：",
             "",
             "- `mcp.json`：首选 MCP 配置，server 名称是 `agentsight`，command 是本机安装目录下的 `AgentSightMcp.exe` 绝对路径，不包含 token。",
@@ -1075,14 +1252,52 @@ def _ai_install_readme(install_root: Path, current_dir: Path) -> str:
     )
 
 
-def _show_install_prompt(text: str) -> bool:
+def _show_install_prompt(text: str) -> dict[str, Any]:
     if os.name != "nt":
-        return False
+        return {"shown": False, "ui_contract": _prompt_not_shown_ui_contract()}
     try:
-        ctypes.windll.user32.MessageBoxW(None, text, "AgentSight for Windows 已安装", 0x00000040)
-        return True
+        import tkinter as tk
+        from tkinter import ttk
+
+        root = tk.Tk()
+        root.title("AgentSight for Windows 已安装")
+        root.geometry("760x420")
+        root.minsize(640, 320)
+        root.grid_columnconfigure(0, weight=1)
+        root.grid_rowconfigure(1, weight=1)
+
+        ttk.Label(root, text="AgentSight for Windows 已安装。请复制下面提示交给 AI 客户端。", padding=(12, 12, 12, 6)).grid(
+            row=0,
+            column=0,
+            sticky="ew",
+        )
+        text_box = tk.Text(root, wrap="word", height=14)
+        text_box.insert("1.0", text)
+        text_box.configure(state="disabled")
+        text_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=6)
+
+        buttons = ttk.Frame(root, padding=(12, 6, 12, 12))
+        buttons.grid(row=2, column=0, sticky="ew")
+        buttons.grid_columnconfigure(0, weight=1)
+
+        status = tk.StringVar(value="")
+        ttk.Label(buttons, textvariable=status).grid(row=0, column=0, sticky="w")
+
+        def copy_to_clipboard() -> None:
+            root.clipboard_clear()
+            root.clipboard_append(text)
+            status.set("已复制。")
+
+        ttk.Button(buttons, text="复制提示", command=copy_to_clipboard).grid(row=0, column=1, padx=(8, 0))
+        ttk.Button(buttons, text="关闭", command=root.destroy).grid(row=0, column=2, padx=(8, 0))
+        root.mainloop()
+        return {"shown": True, "ui_contract": _completion_prompt_ui_contract()}
     except Exception:
-        return False
+        try:
+            ctypes.windll.user32.MessageBoxW(None, text, "AgentSight for Windows 已安装", 0x00000040)
+            return {"shown": True, "ui_contract": _legacy_message_box_prompt_ui_contract()}
+        except Exception:
+            return {"shown": False, "ui_contract": _prompt_not_shown_ui_contract()}
 
 
 def _default_install_root() -> Path:

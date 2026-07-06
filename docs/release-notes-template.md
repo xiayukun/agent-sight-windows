@@ -2,7 +2,7 @@
 
 中文 | [English](release-notes-template.en.md)
 
-复制本模板为 `docs/release-notes-vX.Y.Z.md`，英文镜像使用 `docs/release-notes-vX.Y.Z.en.md`。GitHub Release 正文建议中文在上、英文在下，或直接链接英文镜像。
+复制本模板为 `docs/release-notes-vX.Y.Z.md`。GitHub Release 正文使用中文主发布说明；如需英文镜像，作为文档链接提供，不在 workflow 中自动拼接进 Release 正文。
 
 ## AgentSight for Windows vX.Y.Z
 

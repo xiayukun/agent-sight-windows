@@ -413,7 +413,7 @@ Release workflow 要求：
 - 构建 dist exe；
 - 生成 SHA256 checksums；
 - 上传 release artifacts；
-- release notes 中文为主，英文附在下方或链接。
+- GitHub Release 正文使用中文主发布说明，英文镜像通过链接提供；不要在 workflow 中自动拼接中英文正文，避免 Release 首屏重复。
 
 不要马上做大而全安装器。发布文档可以说明未来安装包方向，但当前主线仍是用户态 Session Supervisor。
 

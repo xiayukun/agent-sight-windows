@@ -1288,6 +1288,29 @@ class P1GTrayGuiControlSurfaceTest(unittest.TestCase):
         self.assertEqual(selected_timestamps, timestamps[-500:])
         self.assertGreater(selected_timestamps[0], right_wall_ms - 3_600_000)
 
+    def test_timeline_duration_uses_timestamps_not_mkv_decode_playback_pts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local = Path(temp_dir) / "LocalAppData"
+            roaming = Path(temp_dir) / "Roaming"
+            env = {"LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
+            right_wall_ms = 10_000_000
+            timestamps = [right_wall_ms - 9_000 + index * 1_000 for index in range(10)]
+            with mock.patch.dict("os.environ", env, clear=False):
+                self._write_timeline_mkv_index(local, "agentsight-ten-second-window", timestamps)
+                model = build_timeline_model(max_frames=500, max_logs=10, right_wall_ms=right_wall_ms)
+
+        self.assertEqual(model["frame_count"], 10)
+        timing = model["timeline_timing"]
+        self.assertEqual(timing["time_axis_basis"], "timestamp_ms")
+        self.assertEqual(timing["recorded_duration_ms"], 9_000)
+        self.assertEqual(timing["decode_playback_duration_ms"], 360)
+        self.assertFalse(timing["decode_playback_duration_is_timeline_duration"])
+        self.assertEqual(model["timeline_config"]["recorded_duration_ms"], 9_000)
+        self.assertEqual(model["timeline_config"]["decode_playback_duration_ms"], 360)
+        self.assertEqual([frame["timeline_position_ms"] for frame in model["frames"]], [index * 1_000 for index in range(10)])
+        self.assertEqual([frame["decode_seek_pts_ms"] for frame in model["frames"]], [index * 40 for index in range(10)])
+        self.assertTrue(all(frame["decode_seek_pts_is_timeline_position"] is False for frame in model["frames"]))
+
     def test_timeline_initial_window_includes_boundaries_and_excludes_future(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             local = Path(temp_dir) / "LocalAppData"

@@ -26,6 +26,100 @@ Entry selection:
 3. Do not mix MCP and direct HTTP in one attempt unless debugging is explicitly
    requested by the operator.
 
+## 0. Five-request happy path quickstart
+
+This is the ordinary `screen -> look -> do -> look` path in five requests or
+fewer. Step 0 reads local discovery and is setup, not a Host Agent HTTP request.
+For MCP callers, send the same JSON arguments to the public `screen`, `look`,
+and `do` tools.
+
+0. read discovery from `%LOCALAPPDATA%\AgentSight\host-agent.json`; use only its
+   `url`, bearer `token`, and `api.screen` / `api.look` / `api.do` fields.
+1. `/screen` gets the virtual desktop bounds and embedded readiness:
+
+```json
+{"v": "V1", "id": "screen-1", "op": "screen"}
+```
+
+2. full `/look` captures the current desktop pixels. Fill `r` from `/screen`
+   virtual desktop bounds:
+
+```json
+{
+  "v": "V1",
+  "id": "look-1",
+  "op": "look",
+  "q": "frame",
+  "src": {"type": "screen", "t": "latest"},
+  "r": {"x": 0, "y": 0, "w": 1920, "h": 1080},
+  "scale_down": 4,
+  "image_response": {"mode": "inline_lowres", "max_edge": 512}
+}
+```
+
+3. `/do` uses the `view.id` returned by `look-1`. Minimal mouse click + typing
+   JSON:
+
+```json
+{
+  "v": "V1",
+  "id": "do-1",
+  "op": "do",
+  "basis": {"view_id": "<view.id from look-1>"},
+  "seq": [
+    {"t": "move", "x": 320, "y": 240, "coord": "view", "move": "instant"},
+    {"t": "click", "b": "left"},
+    100,
+    {"t": "text", "text": "hello"}
+  ]
+}
+```
+
+   Minimal pure keyboard JSON. Even pure keyboard input still requires basis.view_id
+   from a current `/look` so the operation is tied to current screen evidence
+   and readiness:
+
+```json
+{
+  "v": "V1",
+  "id": "do-keyboard-1",
+  "op": "do",
+  "basis": {"view_id": "<view.id from look-1>"},
+  "seq": [
+    {"t": "key", "key": "TAB"},
+    {"t": "text", "text": "hello"}
+  ]
+}
+```
+
+4. after `/look` observes fresh pixels after input. Use a new latest screen look
+   or a view-based crop if the region is stable:
+
+```json
+{
+  "v": "V1",
+  "id": "look-after-1",
+  "op": "look",
+  "q": "frame",
+  "src": {"type": "screen", "t": "latest"},
+  "r": {"x": 0, "y": 0, "w": 1920, "h": 1080},
+  "scale_down": 4,
+  "image_response": {"mode": "inline_lowres", "max_edge": 512}
+}
+```
+
+When to use AgentSight:
+
+- Use AgentSight for visible Windows GUI tasks where an AI must inspect real pixels and send human-equivalent mouse/keyboard input.
+- Use AgentSight for screen monitoring, timeline review, operation-log review, and MKV VFR evidence inspection when pixel-grounded auditability matters.
+- Use AgentSight when the target application has no safe direct API and the operator wants a visible, local-first control surface.
+
+When not to use AgentSight:
+
+- Prefer a direct API for structured data, backend jobs, downloads, or service administration when a safe API exists.
+- do not use AgentSight as a shell substitute, background business API, OCR layer, clipboard bridge, DOM reader, accessibility-tree reader, or window-semantics provider.
+- Do not use AgentSight to claim target hit, causality, or business success; those are caller-side judgments over evidence.
+
 Use the installed/running Host Agent first. Ordinary AI GUI work should not
 depend on the source checkout, `PYTHONPATH=src`, `py -m ...`, or temporary
 terminal startup commands. Source commands, first-use doctor, capture smoke, and
@@ -248,7 +342,7 @@ Rules:
 Use `/screen` to read the virtual desktop coordinate system and monitor layout.
 
 ```json
-{"v":"V1","id":"screen-1","op":"screen"}
+{"v": "V1", "id": "screen-1", "op": "screen"}
 ```
 
 `/screen` is read-only from the caller's perspective. It returns virtual screen dimensions and monitor facts, including possible negative coordinates when a monitor is left of or above the primary display. When capture is available, it also writes a `screen_frame_index` entry for the visual-memory timeline, but it does not return image bytes or judge UI meaning. It does not send input, OCR, inspect window semantics, read clipboard, or call hidden APIs.
@@ -291,6 +385,9 @@ Rules:
 - `src.type=view` / `src.type="view"` means `r` is in parent view pixels.
 - The Host Agent stores the view-to-screen mapping. Use returned `view.id` as the basis for later `look` and `do` calls.
 - Ordinary public `look q="frame"` returns the pixels as transient MCP image content, not as a default derived PNG file on disk.
+- For direct HTTP JSON fallback, `image_response` is optional. If an
+  `image_response` object is present and `mode` is omitted, it defaults to
+  `inline_lowres`; set `"mode": "none"` to suppress the JSON `review_image`.
 - `look` returns `view.id`, dimensions, scale, and `view_record` mapping facts. The `view_record` is the traceable index used for child looks, `/do` coordinate conversion, and future on-demand previews.
 - In `view_record`, `requested_screen_region` is in virtual screen pixels; `actual_decoded_region` is in the source frame / Segment stored-frame pixels used to regenerate an on-demand preview. Do not mix these coordinate spaces.
 - Canonical storage is the MKV VFR Segment (`*.mkv`) plus `.frames.jsonl` frame index, operation log, and view records. Ordinary public `screen` / `look` / `do` captures should flow from memory frame payloads directly into MKV; they should not create `session-*/media/*.png|*.bmp` or legacy evidence objects by default. The returned image content is a derived review image for this response only.

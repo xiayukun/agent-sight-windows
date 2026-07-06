@@ -14,10 +14,10 @@ It is built for computer-use agents, Windows AI agents, local GUI automation exp
 
 ## Download
 
-The first formal release is `1.0.0`. On the GitHub Release page, the recommended front-door download is:
+The current patch release is `1.0.1`. On the GitHub Release page, the recommended front-door download is:
 
 ```text
-AgentSightSetup-1.0.0-windows-x64.exe
+AgentSightSetup-1.0.1-windows-x64.exe
 ```
 
 In a local build directory, the setup file is usually named:
@@ -73,8 +73,8 @@ do
 - Uses `scale_down`, regions, crops, and `view_id` so the agent can focus attention instead of taking a full-resolution desktop image every time.
 - Sends human-equivalent mouse and keyboard input when the operator allows it and the Host Agent is ready.
 - Records operation logs, MKV VFR video segments, `.frames.jsonl` frame indexes, and `.manifest.json` manifests.
-- Provides visual-memory review helpers such as `time.near`, change summaries, diffs, and review clips.
-- Keeps a visible Tray GUI for pause, allow, emergency stop, capture/retention settings, timeline, and operation log review.
+- Provides visual-memory review helpers such as `time.near`, change summaries, diffs, review clips, and timeline settings.
+- Keeps a visible Tray GUI for pause, allow, emergency stop, capture/retention settings, screen monitor, timeline, and operation log review.
 
 ## What it does not do
 
@@ -95,7 +95,7 @@ AgentSight has a hard boundary. It does not provide:
 
 ## Evidence, replay, and visual memory
 
-Current canonical storage is MKV VFR:
+Current canonical storage is MKV VFR video storage:
 
 ```text
 %LOCALAPPDATA%\AgentSight\runs_host_agent\segments\*.mkv
@@ -147,7 +147,7 @@ py tools/build_host_agent_exe.py
 - [AgentSight 1.0.0 public architecture](docs/agentsight-1.0.0-public-architecture.en.md)
 - [Repository About / Topics](docs/repository-profile.en.md)
 - [Release checklist](docs/release-checklist.en.md)
-- [v1.0.0 release notes draft](docs/release-notes-v1.0.0.en.md)
+- [v1.0.1 release notes](docs/release-notes-v1.0.1.md)
 - [Screen / Look / Do protocol](docs/SCREEN_LOOK_DO_PROTOCOL.md)
 - [Visual memory and attention](docs/visual-memory-and-attention.en.md)
 - [Hermes onboarding guide](docs/HERMES_ONBOARDING.md)

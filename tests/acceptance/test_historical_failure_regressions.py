@@ -11,6 +11,7 @@ from agentsight.adapters.mcp import MCPStdioAdapter
 from agentsight.host_agent.server import _host_agent_apply_recording_policy_defaults
 from agentsight.protocol.schemas import MAX_POST_OBSERVE_FRAME_COUNT, SchemaError, validate_post_observe, validate_request
 from agentsight.tray.state import apply_recording_policy_settings, write_default_tray_config_if_missing
+from agentsight.visual_memory.post_observe import build_post_action_observation_window
 from tests.acceptance.test_p3a_screen_look_do_protocol import P3AInputChannel, P3AMemoryLookChannel
 
 
@@ -71,6 +72,34 @@ class AgentSightHistoricalFailureRegressionsTest(unittest.TestCase):
         self.assertEqual(applied["post_observe"]["frame_count"], 10)
         self.assertEqual(applied["post_observe"]["interval_ms"], 1000)
         self.assertEqual(applied["post_observe"]["delay_ms"], 0)
+
+    def test_post_action_window_reports_requested_window_and_sample_timestamp_span(self) -> None:
+        frames = [
+            {
+                "observation_id": f"post-{index}",
+                "captured_at": 1_800_000_000 + index,
+                "coordinate_system": "virtual_screen_pixels",
+            }
+            for index in range(10)
+        ]
+
+        window = build_post_action_observation_window(
+            baseline_frame=None,
+            frames=frames,
+            screen_region={"x": 0, "y": 0, "w": 10, "h": 10},
+            coordinate_system="virtual_screen_pixels",
+            request={"delay_ms": 0, "frame_count": 10, "interval_ms": 1000, "stop_when_stable": False},
+            frame_path=lambda frame: None,
+        )
+
+        self.assertEqual(window["sampled_frame_count"], 10)
+        self.assertEqual(window["requested_sampling_window_ms"], 10_000)
+        self.assertEqual(window["expected_sample_span_ms"], 9_000)
+        self.assertEqual(window["sampled_time_span_ms"], 9_000)
+        self.assertEqual(window["sampling_time_basis"], "frame_capture_timestamps")
+        self.assertEqual(window["summary"]["requested_sampling_window_ms"], 10_000)
+        self.assertEqual(window["summary"]["expected_sample_span_ms"], 9_000)
+        self.assertEqual(window["summary"]["sampled_time_span_ms"], 9_000)
 
     def test_explicit_post_observe_and_scale_down_boundaries_fail_honestly(self) -> None:
         invalid_post_observe_values = [

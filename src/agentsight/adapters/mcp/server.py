@@ -70,6 +70,16 @@ def _field_schema(field: str) -> dict[str, Any]:
         }
     if field == "scale_down":
         return {"type": "integer", "minimum": 1, "maximum": 32}
+    if field == "image_response":
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "mode": {"type": "string", "enum": ["inline_lowres", "none"], "default": "inline_lowres"},
+                "max_edge": {"type": "integer", "minimum": 1, "maximum": 1024, "default": 512},
+            },
+            "description": "Optional HTTP JSON fallback review image request. Returned image is derived_review_only and not canonical evidence.",
+        }
     if field == "basis":
         return {
             "type": "object",
@@ -279,6 +289,46 @@ class MCPStdioAdapter:
             return public_tool_rejection(name)
         return self.session.call(name, arguments or {})
 
+    def initialize(self) -> dict[str, Any]:
+        public_tool_names = list(MCP_TOOL_NAMES)
+        return {
+            "ok": True,
+            "data": {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {"name": "agentsight", "title": "AgentSight for Windows"},
+                "capabilities": {"tools": {"public_tool_names": public_tool_names}},
+                "boundary": {
+                    "ocr_used": False,
+                    "clipboard_used": False,
+                    "accessibility_tree_used": False,
+                    "dom_used": False,
+                    "window_semantics_used": False,
+                    "business_success_judged": False,
+                },
+            },
+        }
+
+    def self_check(self) -> dict[str, Any]:
+        public_tool_names = list(MCP_TOOL_NAMES)
+        return {
+            "ok": True,
+            "data": {
+                "mcp_server_name": "agentsight",
+                "public_tool_names": public_tool_names,
+                "expected_client_tool_names": [f"mcp__agentsight__{name}" for name in public_tool_names],
+                "token_returned": False,
+                "auth_material_returned": False,
+                "boundary": {
+                    "ocr_used": False,
+                    "clipboard_used": False,
+                    "accessibility_tree_used": False,
+                    "dom_used": False,
+                    "window_semantics_used": False,
+                    "business_success_judged": False,
+                },
+            },
+        }
+
     def close(self) -> None:
         self.session.close()
 
@@ -290,6 +340,10 @@ class MCPStdioAdapter:
 
     def handle_message(self, message: dict[str, Any]) -> dict[str, Any]:
         method = message.get("method")
+        if method == "initialize":
+            return self.initialize()
+        if method in {"agentsight/self_check", "self_check"}:
+            return self.self_check()
         if method in {"tools/list", "list_tools"}:
             return {"ok": True, "data": self.list_tools()}
         if method in {"tools/call", "call_tool"}:
@@ -300,20 +354,81 @@ class MCPStdioAdapter:
         return {"ok": False, "error": "unsupported MCP adapter message"}
 
 
-def main() -> int:
-    adapter = MCPStdioAdapter(enforce_public_tool_allowlist=True)
-    raw = sys.stdin.read().strip()
-    if not raw:
-        print(json.dumps({"ok": False, "error": "empty input"}))
-        return 1
+def _jsonrpc_error_response(request_id: object, code: int, message: str, data: object | None = None) -> dict[str, Any]:
+    error: dict[str, Any] = {"code": code, "message": message}
+    if data is not None:
+        error["data"] = data
+    return {"jsonrpc": "2.0", "id": request_id, "error": error}
 
-    messages = [json.loads(line) for line in raw.splitlines() if line.strip()]
-    responses = [adapter.handle_message(message) for message in messages]
-    if len(responses) == 1:
-        print(json.dumps(responses[0], ensure_ascii=False))
-    else:
-        for response in responses:
-            print(json.dumps(response, ensure_ascii=False))
+
+def _jsonrpc_result_response(request_id: object, result: object) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _legacy_adapter_response_to_jsonrpc(response: dict[str, Any]) -> object:
+    if response.get("ok") is True and "data" in response:
+        return response["data"]
+    return response
+
+
+def _handle_jsonrpc_message(adapter: MCPStdioAdapter, message: object) -> dict[str, Any] | None:
+    if not isinstance(message, dict):
+        return _jsonrpc_error_response(None, -32600, "Invalid Request")
+
+    request_id = message.get("id")
+    is_notification = "id" not in message
+    method = message.get("method")
+    if not isinstance(method, str):
+        if is_notification:
+            return None
+        return _jsonrpc_error_response(request_id, -32600, "Invalid Request")
+
+    if method == "notifications/initialized":
+        return None
+
+    try:
+        response = adapter.handle_message(message)
+    except Exception as exc:  # pragma: no cover - defensive JSON-RPC boundary guard
+        if is_notification:
+            return None
+        return _jsonrpc_error_response(request_id, -32603, "Internal error", {"detail": str(exc)})
+    if response.get("ok") is False:
+        if is_notification:
+            return None
+        return _jsonrpc_error_response(request_id, -32601, str(response.get("error", "Method not found")), response)
+    if is_notification:
+        return None
+    return _jsonrpc_result_response(request_id, _legacy_adapter_response_to_jsonrpc(response))
+
+
+def _is_jsonrpc_message(message: object) -> bool:
+    return isinstance(message, dict) and (message.get("jsonrpc") == "2.0" or "id" in message)
+
+
+def main() -> int:
+    with MCPStdioAdapter(enforce_public_tool_allowlist=True) as adapter:
+        for line in sys.stdin:
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                message = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                print(
+                    json.dumps(_jsonrpc_error_response(None, -32700, "Parse error", {"detail": str(exc)}), ensure_ascii=False),
+                    flush=True,
+                )
+                continue
+
+            if _is_jsonrpc_message(message):
+                response = _handle_jsonrpc_message(adapter, message)
+            elif isinstance(message, dict):
+                response = adapter.handle_message(message)
+            else:
+                response = _jsonrpc_error_response(None, -32600, "Invalid Request")
+
+            if response is not None:
+                print(json.dumps(response, ensure_ascii=False), flush=True)
     return 0
 
 

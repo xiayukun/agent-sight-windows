@@ -142,6 +142,7 @@ def build_timeline_model(
         right_wall_ms=effective_right_wall_ms,
         duration_limit_ms=duration_limit_ms,
     )
+    timing_report = _timeline_timing_report(frames)
     logs = read_operation_log(limit=max_logs)
     attachments = _attach_operation_logs_to_frames(frames, logs)
     return {
@@ -155,8 +156,15 @@ def build_timeline_model(
         "operation_log_attachments": attachments,
         "frame_count": len(frames),
         "operation_log_count": len(logs),
+        "timeline_timing": timing_report,
         "timeline_config": {
             "time_axis_px_per_second": 10,
+            "time_axis_basis": "timestamp_ms",
+            "timeline_time_basis": "timestamp_ms",
+            "recorded_duration_ms": timing_report["recorded_duration_ms"],
+            "decode_playback_duration_ms": timing_report["decode_playback_duration_ms"],
+            "decode_playback_time_basis": timing_report["decode_playback_time_basis"],
+            "decode_playback_duration_is_timeline_duration": False,
             "initial_window_seconds": None if duration_limit_ms is None else int(duration_limit_ms // 1000),
             "duration_limit_ms": None if duration_limit_ms is None else int(duration_limit_ms),
             "frame_limit": max(1, int(max_frames)),
@@ -170,7 +178,7 @@ def build_timeline_model(
             "thumbnail_batch_size": len(frames),
             "source": str(default_tray_config_file()),
         },
-        "raw_or_derived_note": "Timeline opens metadata-first from MKV frame indexes. It decodes the selected frame in memory and does not judge target hit, causality, or business success.",
+        "raw_or_derived_note": "Timeline opens metadata-first from MKV frame indexes. The visible timeline duration is based on timestamp_ms; MKV playback_pts_ms is decode-seek metadata only and may be much shorter for sparse captures. It decodes the selected frame in memory and does not judge target hit, causality, or business success.",
         "boundary": boundary_facts(),
     }
 
@@ -194,6 +202,7 @@ def _select_timeline_frame_window(
     selected = duration_filtered[-frame_limit:]
     for index, frame in enumerate(selected):
         frame["index"] = index
+    _annotate_timeline_positions(selected)
     return selected, {
         "scanned_frame_count": len(sorted_frames),
         "eligible_frame_count": len(eligible),
@@ -260,7 +269,52 @@ def _scan_segment_frames(root: Path, *, max_frames: int | None) -> list[dict[str
     selected = frames if max_frames is None else frames[-max(1, int(max_frames)) :]
     for index, frame in enumerate(selected):
         frame["index"] = index
+    _annotate_timeline_positions(selected)
     return selected
+
+
+def _annotate_timeline_positions(frames: list[dict[str, Any]]) -> None:
+    if not frames:
+        return
+    start_ms = min(int(frame.get("timestamp_ms") or 0) for frame in frames)
+    for frame in frames:
+        timestamp_ms = int(frame.get("timestamp_ms") or start_ms)
+        restore_ref = frame.get("segment_restore_ref") if isinstance(frame.get("segment_restore_ref"), dict) else {}
+        playback_pts_ms = restore_ref.get("playback_pts_ms") if restore_ref.get("playback_pts_ms") is not None else frame.get("playback_pts_ms")
+        playback_time_basis = restore_ref.get("playback_time_basis") or frame.get("playback_time_basis")
+        frame["timeline_position_ms"] = max(0, timestamp_ms - start_ms)
+        frame["timeline_time_basis"] = "timestamp_ms"
+        frame["decode_seek_pts_ms"] = playback_pts_ms
+        frame["decode_seek_time_basis"] = playback_time_basis
+        frame["decode_seek_pts_is_timeline_position"] = False
+
+
+def _timeline_timing_report(frames: list[dict[str, Any]]) -> dict[str, Any]:
+    timestamps = [int(frame.get("timestamp_ms") or 0) for frame in frames if frame.get("timestamp_ms") is not None]
+    playback_pts_values: list[int] = []
+    playback_time_bases: list[str] = []
+    for frame in frames:
+        restore_ref = frame.get("segment_restore_ref") if isinstance(frame.get("segment_restore_ref"), dict) else {}
+        value = restore_ref.get("playback_pts_ms") if restore_ref.get("playback_pts_ms") is not None else frame.get("playback_pts_ms")
+        if value is not None:
+            try:
+                playback_pts_values.append(int(value))
+            except (TypeError, ValueError):
+                pass
+        basis = restore_ref.get("playback_time_basis") or frame.get("playback_time_basis")
+        if basis is not None:
+            playback_time_bases.append(str(basis))
+    recorded_duration_ms = max(timestamps) - min(timestamps) if len(timestamps) >= 2 else 0
+    decode_playback_duration_ms = max(playback_pts_values) - min(playback_pts_values) if len(playback_pts_values) >= 2 else 0
+    unique_bases = sorted(set(playback_time_bases))
+    return {
+        "time_axis_basis": "timestamp_ms",
+        "recorded_duration_ms": recorded_duration_ms,
+        "decode_playback_duration_ms": decode_playback_duration_ms,
+        "decode_playback_time_basis": unique_bases[0] if len(unique_bases) == 1 else (unique_bases or None),
+        "decode_playback_duration_is_timeline_duration": False,
+        "explanation": "Use recorded_duration_ms/timestamp_ms for timeline duration. decode_playback_duration_ms comes from MKV decode seek PTS and is not action-capture window duration.",
+    }
 
 
 def _scan_binary_agseg_segment_frames(root: Path, *, max_frames: int | None) -> list[dict[str, Any]]:

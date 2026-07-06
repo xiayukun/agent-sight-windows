@@ -983,6 +983,47 @@ def _host_agent_visual_observe(
     return 200, report
 
 
+def _host_frame_with_runtime_payload(
+    frame: dict[str, Any],
+    *,
+    visual_sessions: dict[str, dict[str, Any]],
+    visual_session_id: str,
+) -> dict[str, Any]:
+    """Attach in-process observation bytes to a local frame copy when available.
+
+    HTTP /look calls the in-process MCP adapter's internal observe command. That
+    command intentionally strips private byte payloads from the JSON response,
+    but the gateway keeps them in its short-lived runtime payload map until
+    compaction. Use those bytes only as an internal source for the derived
+    inline review image so live/open MKV segments do not need to be decoded.
+    """
+
+    if not isinstance(frame, dict) or any(key in frame for key in ("_media_bytes", "_bgra_bytes")):
+        return frame
+    observation_id = str(frame.get("observation_id") or "")
+    if not observation_id:
+        return frame
+    session = visual_sessions.get(visual_session_id)
+    adapter = session.get("adapter") if isinstance(session, dict) else None
+    adapter_session = getattr(adapter, "session", None)
+    gateway = getattr(adapter_session, "gateway", None)
+    runtime_payloads = getattr(gateway, "runtime_observation_payloads", None)
+    runtime_frame = runtime_payloads.get(observation_id) if isinstance(runtime_payloads, dict) else None
+    if not isinstance(runtime_frame, dict):
+        observations = getattr(gateway, "observations", None)
+        runtime_frame = observations.get(observation_id) if isinstance(observations, dict) else None
+    if not isinstance(runtime_frame, dict):
+        return frame
+    runtime_payload = {
+        key: runtime_frame[key]
+        for key in ("_media_bytes", "_bgra_bytes")
+        if isinstance(runtime_frame.get(key), (bytes, bytearray, memoryview))
+    }
+    if not runtime_payload:
+        return frame
+    return {**frame, **runtime_payload}
+
+
 def _host_agent_screen_layout(
     *,
     health: dict[str, Any] | None = None,
@@ -1115,6 +1156,10 @@ def _host_agent_protocol_look(
             parent_view=parent_view,
         )
 
+    raw_image_response = request.get("image_response")
+    image_response = raw_image_response if isinstance(raw_image_response, dict) else {}
+    include_review_image = isinstance(raw_image_response, dict) and image_response.get("mode", "inline_lowres") == "inline_lowres"
+    image_response_max_edge = int(image_response.get("max_edge", 512)) if include_review_image else None
     status, observe = _host_agent_visual_observe(
         visual_sessions=visual_sessions,
         runs_dir=runs_dir,
@@ -1123,12 +1168,18 @@ def _host_agent_protocol_look(
     if status != 200:
         return status, observe
     frame = observe.get("observation") if isinstance(observe.get("observation"), dict) else {}
+    frame = _host_frame_with_runtime_payload(
+        frame,
+        visual_sessions=visual_sessions,
+        visual_session_id=str(observe.get("visual_session_id") or "visual-default"),
+    )
     view_record = _remember_host_protocol_view(
         protocol_views,
         frame=frame,
         visual_session_id=str(observe.get("visual_session_id")),
         screen_rect=screen_rect,
         scale_down=scale_down,
+        image_response_max_edge=image_response_max_edge,
         parent_view_id=parent_view.get("view", {}).get("id") if parent_view else None,
         source_rect_in_parent=source_rect_in_parent,
         request_id=request.get("id"),
@@ -1137,7 +1188,11 @@ def _host_agent_protocol_look(
     response_src.setdefault("t", "latest")
     if view_record.get("source_time"):
         response_src["source_time"] = view_record["source_time"]
-    return 200, {
+    mcp_content = view_record.get("mcp_content") or []
+    raw_image_response = request.get("image_response")
+    image_response = raw_image_response if isinstance(raw_image_response, dict) else {}
+    include_review_image = isinstance(raw_image_response, dict) and image_response.get("mode", "inline_lowres") == "inline_lowres"
+    response = {
         "object_type": "LookResult",
         "schema": "agentsight_look_v1",
         "v": request.get("v", "V1"),
@@ -1146,8 +1201,8 @@ def _host_agent_protocol_look(
         "type": "frame",
         "view": view_record["view"],
         "view_record": view_record["public_record"],
-        "content": view_record.get("mcp_content") or [],
-        "image_content_returned": bool(view_record.get("mcp_content")),
+        "content": mcp_content,
+        "image_content_returned": bool(mcp_content),
         "image_content_type": "mcp_image_content",
         "derived_review_file_written": False,
         "raw_or_derived": "derived_review_only",
@@ -1162,6 +1217,28 @@ def _host_agent_protocol_look(
         "tool_asserts_business_success": False,
         "boundary": _host_agent_boundary_facts(),
     }
+    if include_review_image and mcp_content:
+        response["review_image"] = {
+            **mcp_content[0],
+            "raw_or_derived": "derived_review_only",
+            "canonical": False,
+            "derived_review_only": True,
+            "integrity_truth_source": False,
+            "ocr_used": False,
+            "clipboard_used": False,
+            "accessibility_tree_used": False,
+            "dom_used": False,
+            "window_semantics_used": False,
+        }
+        response["image_response"] = {
+            "mode": "inline_lowres",
+            "max_edge": int(image_response.get("max_edge", 512)),
+            "returned": True,
+            "review_image_key": "review_image",
+            "raw_or_derived": "derived_review_only",
+            "canonical": False,
+        }
+    return 200, response
 
 
 def _host_agent_protocol_look_time_near(
@@ -1694,6 +1771,11 @@ def _host_agent_protocol_look_diff(
     if status != 200:
         return status, observe
     frame = observe.get("observation") if isinstance(observe.get("observation"), dict) else {}
+    frame = _host_frame_with_runtime_payload(
+        frame,
+        visual_sessions=visual_sessions,
+        visual_session_id=str(observe.get("visual_session_id") or "visual-default"),
+    )
     after_view = _remember_host_protocol_view(
         protocol_views,
         frame=frame,
@@ -2206,9 +2288,16 @@ def _remember_host_protocol_view(
     parent_view_id: str | None,
     source_rect_in_parent: dict[str, int] | None,
     request_id: Any,
+    image_response_max_edge: int | None = None,
 ) -> dict[str, Any]:
     view_id = f"v_{uuid.uuid4().hex[:8]}"
-    export = _export_host_protocol_view_image_content(frame, screen_rect=screen_rect, scale_down=scale_down)
+    export = _export_host_protocol_view_image_content(
+        frame,
+        screen_rect=screen_rect,
+        scale_down=scale_down,
+        image_response_max_edge=image_response_max_edge,
+    )
+    effective_scale_down = int(export.get("scale_down") or scale_down)
     source_timestamp = float(frame.get("captured_at") or frame.get("timestamp") or time.time())
     segment_frame = frame.get("segment_frame") if isinstance(frame.get("segment_frame"), dict) else {}
     segment_restore_ref = segment_frame.get("restore_ref") or segment_frame.get("segment_restore_ref")
@@ -2218,8 +2307,8 @@ def _remember_host_protocol_view(
         "view_pixels_to_virtual_screen_pixels": {
             "origin_x": int(screen_rect["x"]),
             "origin_y": int(screen_rect["y"]),
-            "scale_x": int(scale_down),
-            "scale_y": int(scale_down),
+            "scale_x": effective_scale_down,
+            "scale_y": effective_scale_down,
             "formula": "screen_x=origin_x+view_x*scale_x; screen_y=origin_y+view_y*scale_y",
         },
         "blur_changes_coordinates": False,
@@ -2229,7 +2318,7 @@ def _remember_host_protocol_view(
         "id": view_id,
         "w": export["w"],
         "h": export["h"],
-        "scale_down": scale_down,
+        "scale_down": effective_scale_down,
     }
     source_screen_region = _host_frame_screen_region(frame, fallback=screen_rect)
     actual_decoded_region = _host_decoded_region_from_screen_rect(screen_rect, source_screen_region)
@@ -2245,7 +2334,7 @@ def _remember_host_protocol_view(
         "requested_screen_region": dict(screen_rect),
         "actual_decoded_region": actual_decoded_region,
         "output_image_size": {"w": export["w"], "h": export["h"]},
-        "scale_down": scale_down,
+        "scale_down": effective_scale_down,
         "blur": False,
         "blur_radius": 0,
         "cursor_mode": "none",
@@ -2542,38 +2631,154 @@ def _export_host_protocol_view_image_content(
     *,
     screen_rect: dict[str, int],
     scale_down: int,
+    image_response_max_edge: int | None = None,
 ) -> dict[str, Any]:
     raw_path_text = _frame_media_path(frame)
-    target_w = max(1, (int(screen_rect["w"]) + scale_down - 1) // scale_down)
-    target_h = max(1, (int(screen_rect["h"]) + scale_down - 1) // scale_down)
-    if raw_path_text:
-        raw_path = Path(raw_path_text)
-        try:
-            width, height, rows = _read_png_rgb_rows(raw_path)
+    effective_scale_down = _host_protocol_effective_image_scale_down(
+        width=int(screen_rect["w"]),
+        height=int(screen_rect["h"]),
+        scale_down=scale_down,
+        image_response_max_edge=image_response_max_edge,
+    )
+    target_w = max(1, (int(screen_rect["w"]) + effective_scale_down - 1) // effective_scale_down)
+    target_h = max(1, (int(screen_rect["h"]) + effective_scale_down - 1) // effective_scale_down)
+    raw_decode_error: dict[str, Any] | None = None
+    try:
+        bgra_bytes = frame.get("_bgra_bytes")
+        if isinstance(bgra_bytes, (bytes, bytearray, memoryview)):
+            width = int(frame.get("width") or screen_rect["w"])
+            height = int(frame.get("height") or screen_rect["h"])
+            rows = _rgb_rows_from_bgra_bytes(bytes(bgra_bytes), width=width, height=height)
+            effective_scale_down = _host_protocol_effective_image_scale_down(
+                width=width,
+                height=height,
+                scale_down=scale_down,
+                image_response_max_edge=image_response_max_edge,
+            )
             scaled_w, scaled_h, scaled_rows = _scale_rgb_rows(
                 rows,
                 width=width,
                 height=height,
-                scale=1.0 / max(1, scale_down),
+                scale=1.0 / effective_scale_down,
             )
             png_bytes = _png_from_rgb_rows(scaled_rows, width=scaled_w, height=scaled_h)
+            return _host_inline_image_export(
+                png_bytes,
+                width=scaled_w,
+                height=scaled_h,
+                scale_down=effective_scale_down,
+                status="generated_mcp_image_content_from_runtime_bgra_frame",
+            )
+        media_bytes = frame.get("_media_bytes")
+        if isinstance(media_bytes, (bytes, bytearray, memoryview)):
+            width, height, rows = _read_png_rgb_rows_from_bytes(bytes(media_bytes))
+            effective_scale_down = _host_protocol_effective_image_scale_down(
+                width=width,
+                height=height,
+                scale_down=scale_down,
+                image_response_max_edge=image_response_max_edge,
+            )
+            scaled_w, scaled_h, scaled_rows = _scale_rgb_rows(
+                rows,
+                width=width,
+                height=height,
+                scale=1.0 / effective_scale_down,
+            )
+            png_bytes = _png_from_rgb_rows(scaled_rows, width=scaled_w, height=scaled_h)
+            return _host_inline_image_export(
+                png_bytes,
+                width=scaled_w,
+                height=scaled_h,
+                scale_down=effective_scale_down,
+                status="generated_mcp_image_content_from_runtime_media_frame",
+            )
+    except Exception as exc:
+        raw_decode_error = {"type": type(exc).__name__, "message": str(exc), "source": "runtime_frame_payload"}
+    if raw_path_text:
+        raw_path = Path(raw_path_text)
+        try:
+            width, height, rows = _read_png_rgb_rows(raw_path)
+            effective_scale_down = _host_protocol_effective_image_scale_down(
+                width=width,
+                height=height,
+                scale_down=scale_down,
+                image_response_max_edge=image_response_max_edge,
+            )
+            scaled_w, scaled_h, scaled_rows = _scale_rgb_rows(
+                rows,
+                width=width,
+                height=height,
+                scale=1.0 / effective_scale_down,
+            )
+            png_bytes = _png_from_rgb_rows(scaled_rows, width=scaled_w, height=scaled_h)
+            return _host_inline_image_export(
+                png_bytes,
+                width=scaled_w,
+                height=scaled_h,
+                scale_down=effective_scale_down,
+                status="generated_mcp_image_content",
+            )
+        except Exception as exc:
+            raw_decode_error = {"type": type(exc).__name__, "message": str(exc)}
+    segment_frame = frame.get("segment_frame") if isinstance(frame.get("segment_frame"), dict) else {}
+    segment_restore_ref = segment_frame.get("restore_ref") or segment_frame.get("segment_restore_ref")
+    if isinstance(segment_restore_ref, dict):
+        source_screen_region = _host_frame_screen_region(frame, fallback=screen_rect)
+        decode_region = _host_decoded_region_from_screen_rect(screen_rect, source_screen_region)
+        try:
+            decoded_review = decode_segment_region_to_image_content(
+                segment_restore_ref,
+                region=decode_region,
+                scale_down=effective_scale_down,
+            )
+            decoded_region = decoded_review.get("region") if isinstance(decoded_review.get("region"), dict) else decode_region
+            decoded_scale = decoded_review.get("scale_down") or effective_scale_down
+            decoded_scale_float = float(decoded_scale or 1)
             return {
-                "mcp_content": [
-                    {
-                        "type": "image",
-                        "mimeType": "image/png",
-                        "data": base64.b64encode(png_bytes).decode("ascii"),
-                        "raw_or_derived": "derived_review_only",
-                        "canonical": False,
-                    }
-                ],
-                "w": scaled_w,
-                "h": scaled_h,
-                "status": "generated_mcp_image_content",
+                "mcp_content": decoded_review.get("mcp_content") if isinstance(decoded_review.get("mcp_content"), list) else [],
+                "w": max(1, int(int(decoded_region.get("w", screen_rect["w"])) / decoded_scale_float)),
+                "h": max(1, int(int(decoded_region.get("h", screen_rect["h"])) / decoded_scale_float)),
+                "scale_down": int(decoded_scale_float) if decoded_scale_float.is_integer() else decoded_scale_float,
+                "status": "generated_mcp_image_content_from_segment_frame",
+                "decode_region": decoded_region,
+                "segment_restore_ref": segment_restore_ref,
             }
-        except Exception:
-            return {"mcp_content": [], "w": target_w, "h": target_h, "status": "image_content_unavailable"}
-    return {"mcp_content": [], "w": target_w, "h": target_h, "status": "image_content_unavailable"}
+        except Exception as exc:
+            return {
+                "mcp_content": [],
+                "w": target_w,
+                "h": target_h,
+                "scale_down": effective_scale_down,
+                "status": "image_content_unavailable",
+                "unavailable_reason": "segment_frame_decode_failed",
+                "segment_decode_error_type": type(exc).__name__,
+                "segment_decode_error": str(exc),
+                "raw_decode_error": raw_decode_error,
+            }
+    return {
+        "mcp_content": [],
+        "w": target_w,
+        "h": target_h,
+        "scale_down": effective_scale_down,
+        "status": "image_content_unavailable",
+        "raw_decode_error": raw_decode_error,
+    }
+
+
+def _host_protocol_effective_image_scale_down(
+    *,
+    width: int,
+    height: int,
+    scale_down: int,
+    image_response_max_edge: int | None,
+) -> int:
+    effective_scale_down = max(1, int(scale_down))
+    if image_response_max_edge is None:
+        return effective_scale_down
+    max_edge = max(1, int(image_response_max_edge))
+    longest_edge = max(1, int(width), int(height))
+    max_edge_scale_down = max(1, (longest_edge + max_edge - 1) // max_edge)
+    return max(effective_scale_down, max_edge_scale_down)
 
 
 def _resolve_host_do_view(protocol_views: dict[str, dict[str, Any]], basis: dict[str, Any]) -> dict[str, Any] | None:
@@ -4544,8 +4749,52 @@ def _scale_rgb_rows(
     return review_width, review_height, scaled
 
 
+def _host_inline_image_export(
+    png_bytes: bytes,
+    *,
+    width: int,
+    height: int,
+    scale_down: int | float,
+    status: str,
+) -> dict[str, Any]:
+    return {
+        "mcp_content": [
+            {
+                "type": "image",
+                "mimeType": "image/png",
+                "data": base64.b64encode(png_bytes).decode("ascii"),
+                "raw_or_derived": "derived_review_only",
+                "canonical": False,
+            }
+        ],
+        "w": int(width),
+        "h": int(height),
+        "scale_down": scale_down,
+        "status": status,
+    }
+
+
+def _rgb_rows_from_bgra_bytes(data: bytes, *, width: int, height: int) -> list[bytearray]:
+    expected = int(width) * int(height) * 4
+    if len(data) < expected:
+        raise ValueError("BGRA runtime frame payload is shorter than frame dimensions")
+    rows: list[bytearray] = []
+    offset = 0
+    for _y in range(int(height)):
+        row = bytearray()
+        for _x in range(int(width)):
+            b, g, r, _a = data[offset : offset + 4]
+            row.extend((r, g, b))
+            offset += 4
+        rows.append(row)
+    return rows
+
+
 def _read_png_rgb_rows(path: Path) -> tuple[int, int, list[bytearray]]:
-    data = path.read_bytes()
+    return _read_png_rgb_rows_from_bytes(path.read_bytes())
+
+
+def _read_png_rgb_rows_from_bytes(data: bytes) -> tuple[int, int, list[bytearray]]:
     if not data.startswith(b"\x89PNG\r\n\x1a\n"):
         raise ValueError("raw media is not a PNG")
     offset = 8

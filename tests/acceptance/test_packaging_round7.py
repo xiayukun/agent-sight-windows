@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import io
 import json
 import tempfile
 import tomllib
@@ -322,6 +323,138 @@ class Round7PackagingTest(unittest.TestCase):
         self.assertFalse(report["host_input_sent"])
         self.assertEqual(report["host_sent_event_count"], 0)
 
+    def test_setup_install_report_records_visible_progress_and_copyable_prompt_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = root / "payload"
+            payload.mkdir()
+            for name in ["AgentSightSetup.exe", *installer.PAYLOAD_EXE_NAMES]:
+                (payload / name).write_text(f"fake {name}\n", encoding="utf-8")
+            env = {
+                "LOCALAPPDATA": str(root / "LocalAppData"),
+                "APPDATA": str(root / "Roaming"),
+            }
+            visible_progress = io.StringIO()
+
+            def fake_copy_payload(*args: object, **kwargs: object) -> dict[str, object]:
+                self.assertIn("Copying packaged AgentSight files", visible_progress.getvalue())
+                return {"copy_status": "copied"}
+
+            with mock.patch.dict("os.environ", env, clear=False):
+                with mock.patch("agentsight.installer._install_with_packaged_supervisor", return_value={"exit_code": 0}):
+                    with mock.patch("agentsight.installer.product_status", return_value={"object_type": "AgentSightSetupStatus", "exit_code": 0}):
+                        with mock.patch("agentsight.installer._copy_payload", side_effect=fake_copy_payload):
+                            report = installer.install_agentsight(
+                                payload_dir=payload,
+                                version="1.0.1",
+                                start_now=False,
+                                arm_real_input=True,
+                                show_prompt=False,
+                                progress_stream=visible_progress,
+                            )
+
+        self.assertEqual(report["progress"]["status"], "visible")
+        visible_output = visible_progress.getvalue()
+        self.assertIn("[AgentSight Setup] Preparing install directories", visible_output)
+        self.assertIn("[AgentSight Setup] Copying packaged AgentSight files", visible_output)
+        self.assertIn("[AgentSight Setup] Registering startup and starting AgentSight", visible_output)
+        self.assertIn("[AgentSight Setup] AgentSight setup complete", visible_output)
+        self.assertEqual(report["progress"]["visible_output"], "console")
+        self.assertEqual(
+            [event["key"] for event in report["progress"]["events"]],
+            [
+                "prepare_install_dirs",
+                "stop_existing_supervisor",
+                "copy_payload",
+                "write_runtime_files",
+                "write_ai_install",
+                "write_uninstall_entry",
+                "install_startup",
+                "write_report",
+                "complete",
+            ],
+        )
+        prompt_ui = report["completion_prompt_ui"]
+        self.assertEqual(prompt_ui["ui"], "copyable_win32_dialog")
+        self.assertTrue(prompt_ui["copy_button"])
+        self.assertTrue(prompt_ui["readonly_multiline_text"])
+        self.assertTrue(prompt_ui["selectable_text"])
+        self.assertFalse(prompt_ui["legacy_message_box"])
+
+    def test_setup_completion_prompt_contract_reflects_actual_prompt_ui_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload = root / "payload"
+            payload.mkdir()
+            for name in ["AgentSightSetup.exe", *installer.PAYLOAD_EXE_NAMES]:
+                (payload / name).write_text(f"fake {name}\n", encoding="utf-8")
+            env = {
+                "LOCALAPPDATA": str(root / "LocalAppData"),
+                "APPDATA": str(root / "Roaming"),
+            }
+            fallback_ui = {
+                "ui": "legacy_message_box",
+                "copy_button": False,
+                "readonly_multiline_text": False,
+                "selectable_text": False,
+                "legacy_message_box": True,
+            }
+            with mock.patch.dict("os.environ", env, clear=False):
+                with mock.patch("agentsight.installer._install_with_packaged_supervisor", return_value={"exit_code": 0}):
+                    with mock.patch("agentsight.installer.product_status", return_value={"object_type": "AgentSightSetupStatus", "exit_code": 0}):
+                        with mock.patch(
+                            "agentsight.installer._show_install_prompt",
+                            return_value={"shown": True, "ui_contract": fallback_ui},
+                        ):
+                            report = installer.install_agentsight(
+                                payload_dir=payload,
+                                version="1.0.1",
+                                start_now=False,
+                                arm_real_input=True,
+                                show_prompt=True,
+                                progress_stream=io.StringIO(),
+                            )
+
+        self.assertTrue(report["prompt_shown"])
+        self.assertEqual(report["completion_prompt_ui"], fallback_ui)
+
+    def test_ai_install_docs_explain_when_to_use_and_when_not_to_use_agentsight(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            install_root = Path(temp_dir) / "AgentSight"
+            readme = installer._ai_install_readme(install_root, install_root / "current")
+        skill = (ROOT / "src" / "agentsight" / "adapters" / "skill" / "SKILL.md").read_text(encoding="utf-8")
+
+        for text in [readme, skill]:
+            self.assertIn("When to use AgentSight", text)
+            self.assertIn("When not to use AgentSight", text)
+            self.assertIn("screen monitoring", text)
+            self.assertIn("timeline", text)
+            self.assertIn("direct API", text)
+            self.assertIn("do not use AgentSight as a shell substitute", text)
+
+    def test_ai_handoff_docs_include_five_request_happy_path_quickstart(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            install_root = Path(temp_dir) / "AgentSight"
+            readme = installer._ai_install_readme(install_root, install_root / "current")
+        skill = (ROOT / "src" / "agentsight" / "adapters" / "skill" / "SKILL.md").read_text(encoding="utf-8")
+
+        for text in [readme, skill]:
+            self.assertIn("Five-request happy path", text)
+            self.assertIn("screen -> look -> do -> look", text)
+            self.assertIn("read discovery", text)
+            self.assertIn('"op": "screen"', text)
+            self.assertIn('"op": "look"', text)
+            self.assertIn('"op": "do"', text)
+            self.assertIn('"t": "click"', text)
+            self.assertIn('"t": "text"', text)
+            self.assertIn('"t": "key"', text)
+            self.assertIn('"basis": {"view_id": "<view.id from look-1>"}', text)
+            self.assertIn("Even pure keyboard input still requires basis.view_id", text)
+            quickstart = text.split("Five-request happy path", 1)[1].split("Product Boundary", 1)[0]
+            self.assertNotIn("business_success", quickstart)
+            self.assertNotIn("target_hit", quickstart)
+            self.assertNotIn("causal_loop_ok", quickstart)
+
     def test_setup_stops_running_current_supervisor_before_copying_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -630,6 +763,37 @@ class Round7PackagingTest(unittest.TestCase):
         self.assertIn("EXPECTED_RELEASE_REPOSITORY: xiayukun/agent-sight-windows", text)
         self.assertIn("GITHUB_REPOSITORY", text)
         self.assertIn("unexpected GitHub release repository", text)
+
+    def test_release_workflow_uses_chinese_release_notes_only_without_duplicate_body_heading(self) -> None:
+        text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        resolve_step = text[text.index("Resolve release notes") : text.index("Upload workflow artifact")]
+        notes_101 = ROOT / "docs" / "release-notes-v1.0.1.md"
+        notes_101_en = ROOT / "docs" / "release-notes-v1.0.1.en.md"
+        notes_text = notes_101.read_text(encoding="utf-8")
+        first_content_line = next(line for line in notes_text.splitlines() if line.strip())
+
+        self.assertEqual(first_content_line, "中文")
+        self.assertFalse(notes_101_en.exists())
+        self.assertNotIn("release-notes-combined.md", resolve_step)
+        self.assertNotIn("release-notes-template.en.md", resolve_step)
+        self.assertNotIn("Add-Content", resolve_step)
+        self.assertIn("release-notes-body.md", resolve_step)
+        self.assertIn("RELEASE_NOTES=release-notes-body.md", resolve_step)
+
+    def test_readme_and_repository_profile_include_monitoring_keywords_without_window_semantics(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        readme_en = (ROOT / "README.en.md").read_text(encoding="utf-8")
+        profile = (ROOT / "docs" / "repository-profile.md").read_text(encoding="utf-8")
+
+        self.assertIn("时间线设置", readme)
+        self.assertIn("屏幕监视器", readme)
+        self.assertIn("MKV VFR 视频存储", readme)
+        self.assertIn("timeline settings", readme_en)
+        self.assertIn("screen monitor", readme_en)
+        self.assertIn("MKV VFR video storage", readme_en)
+        self.assertIn("screen-monitoring", profile)
+        self.assertIn("mkv", profile)
+        self.assertNotIn("window-semantics", profile.lower())
 
     def test_gitignore_blocks_local_runtime_and_qa_private_artifacts(self) -> None:
         ignored = set((ROOT / ".gitignore").read_text(encoding="utf-8").splitlines())
